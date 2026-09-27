@@ -146,11 +146,13 @@ class Endpoint:
 class Dataset:
     dataset_id: str
     display_name: str
+    default_snapshot: str | None
     live_ready: bool
     live_blockers: tuple[str, ...]
     provenance: dict[str, Any]
     allowed_endpoints: tuple[Endpoint, ...]
     allowed_doc_domains: tuple[str, ...]
+    provider_errors: dict[str, str]
     request_shape: dict[str, Any]
     skill: str | None
     contract: Contract
@@ -246,6 +248,9 @@ def load_dataset(root: Path) -> Dataset:
         dataset = Dataset(
             dataset_id=str(data["dataset_id"]),
             display_name=str(data["display_name"]),
+            default_snapshot=(
+                str(data["default_snapshot"]) if data.get("default_snapshot") else None
+            ),
             live_ready=bool(data.get("live_ready", False)),
             live_blockers=tuple(str(b) for b in (data.get("live_blockers") or [])),
             provenance=dict(data.get("provenance") or {}),
@@ -258,6 +263,10 @@ def load_dataset(root: Path) -> Dataset:
                 for e in data["allowed_endpoints"]
             ),
             allowed_doc_domains=tuple(str(d) for d in (data.get("allowed_doc_domains") or [])),
+            provider_errors={
+                str(k).upper(): str(v)
+                for k, v in (data.get("provider_errors") or {}).items()
+            },
             request_shape=dict(data.get("request_shape") or {}),
             skill=data.get("skill"),
             contract=contract,
@@ -302,6 +311,12 @@ def _validate(dataset: Dataset) -> None:
     missing = required - coverable
     if missing:
         problems.append(f"probe catalog 가 덮지 못하는 위험 영역: {sorted(missing)}")
+
+    if dataset.default_snapshot is not None:
+        if not dataset.snapshot_path(dataset.default_snapshot).is_file():
+            problems.append(
+                f"default_snapshot 파일이 없습니다: {dataset.default_snapshot}"
+            )
 
     if not dataset.expected_path().is_file():
         problems.append(f"기대값 파일이 없습니다: {dataset.expected_path().name}")

@@ -12,6 +12,10 @@ display_name: 서울시 공공도서관 현황정보
 contract_id: seoul_library_scope
 contract_version: v1
 
+# 스냅샷을 지정하지 않았을 때 쓰는 것. 추측하지 않고 명시한다.
+# seoul_library_authfail 은 AC-06 시연용이므로 기본이 아니다.
+default_snapshot: seoul_library_scope1_5
+
 # PRD §4.5: HTTPS 미확인 데이터 소스는 key 를 전송하는 live 지원에서 제외한다.
 # 이 endpoint 는 HTTPS 를 지원하지 않는 것이 실측으로 확인됐으므로
 # live_ready 는 앞으로도 거짓이다. fixture 전용이다.
@@ -43,6 +47,24 @@ allowed_endpoints:
   - method: GET
     url_prefix: http://openapi.seoul.go.kr:8088/
     allowed_params: []        # 경로 기반이라 query 파라미터를 쓰지 않는다
+
+# 공급자 오류 코드 분류 (FR-006, AC-06).
+# 2026-09-27 실호출로 확인한 코드다. 신뢰된 분류기가 **모델보다 먼저** 중단한다.
+provider_errors:
+  INFO-000: ok
+  INFO-100: auth           # 인증키가 유효하지 않습니다
+  INFO-200: empty          # 해당하는 데이터가 없습니다
+  ERROR-300: bad_request
+  ERROR-301: bad_request
+  ERROR-331: bad_request
+  ERROR-332: bad_request
+  ERROR-333: bad_request
+  ERROR-334: bad_request
+  ERROR-335: bad_request   # 샘플키 범위 초과
+  ERROR-336: bad_request
+  ERROR-500: provider_fault
+  ERROR-600: provider_fault
+  ERROR-601: provider_fault
 
 allowed_doc_domains:
   - data.seoul.go.kr

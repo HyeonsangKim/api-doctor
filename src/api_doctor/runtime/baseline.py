@@ -18,6 +18,7 @@ from ..data.broker import DataBroker, Snapshot, SnapshotInvalid
 from ..registry.loader import Dataset, RegistryInvalid, load_registry
 from ..sandbox.base import Denial, SandboxLimits, SandboxOutcome
 from ..sandbox.selftest import BackendSelection, RuntimeUnavailable, select_backend  # noqa: F401
+from ..verify.classify import Classification, classify_run
 from ..verify.verifier import FixedVerifier, Verdict, load_verifier
 from .budget import BudgetLedger
 from .evidence import EvidenceStore
@@ -164,12 +165,15 @@ def _load_snapshot(dataset: Dataset, snapshot_id: str | None) -> Snapshot:
         available = sorted(p.stem for p in (dataset.root / "snapshots").glob("*.json"))
         if not available:
             raise InputError("SNAPSHOT_REQUIRED", "동결 스냅샷이 없습니다.")
-        if len(available) > 1:
-            raise InputError(
-                "SNAPSHOT_REQUIRED",
-                f"스냅샷을 지정하세요: {available}",
-            )
-        snapshot_id = available[0]
+        # 여러 개면 추측하지 않는다. 레지스트리가 기본을 명시해야 한다.
+        snapshot_id = dataset.default_snapshot
+        if snapshot_id is None:
+            if len(available) > 1:
+                raise InputError(
+                    "SNAPSHOT_REQUIRED",
+                    f"기본 스냅샷이 등록되지 않았습니다. 지정하세요: {available}",
+                )
+            snapshot_id = available[0]
     try:
         return Snapshot.load(dataset.snapshot_path(snapshot_id), dataset.dataset_id)
     except SnapshotInvalid as exc:
@@ -248,32 +252,61 @@ def _execute(
     )
     _record_denials(paths, events, outcome.denials)
 
-    # ---- 고정 검증 ----
-    verifier: FixedVerifier = load_verifier(dataset.contract, dataset.expected_path())
-    verdict = verifier.verify(
-        records=outcome.records, execution_error=outcome.error,
-        candidate_hash=original_hash, snapshot_hash=snapshot.snapshot_hash,
-    )
-    _write_check(paths, verdict)
-    for result in verdict.results:
+    # ---- 공급자 응답 분류 (고정 검증보다 먼저) ----
+    # PRD §3.3: 신뢰된 시스템은 인증·정책·예산 오류를 모델 판단보다 먼저 중단한다.
+    # 인증이 막힌 응답으로 계약을 검증하는 것은 의미가 없으므로 건너뛴다.
+    provider = classify_run(broker.served_bodies(), dataset.provider_errors)
+    if provider.classification is not Classification.OK:
         events.append(
-            EventType.CHECK_RESULT, f"{result.kind}: {result.summary}",
-            kind=str(result.kind), outcome=str(result.outcome),
-            candidate_hash=original_hash, contract_hash=verdict.contract_hash,
-            snapshot_hash=verdict.snapshot_hash, metrics=result.metrics,
+            EventType.BASELINE_RESULT,
+            f"공급자 응답 분류: {provider.classification}"
+            + (f" ({provider.code})" if provider.code else ""),
+            **provider.to_json(),
         )
-    events.append(
-        EventType.BASELINE_RESULT,
-        "원본이 계약을 만족합니다." if verdict.passed else "원본에 결함이 있습니다.",
-        passed=verdict.passed,
-        failed_checks=[str(r.kind) for r in verdict.failures],
-    )
+
+    # 검증기는 세션이 항상 필요로 하므로 분류와 무관하게 만든다.
+    verifier: FixedVerifier = load_verifier(dataset.contract, dataset.expected_path())
+
+    verdict: Verdict | None = None
+    if not provider.classification.is_blocking:
+        verdict = verifier.verify(
+            records=outcome.records, execution_error=outcome.error,
+            candidate_hash=original_hash, snapshot_hash=snapshot.snapshot_hash,
+        )
+        _write_check(paths, verdict)
+        for result in verdict.results:
+            events.append(
+                EventType.CHECK_RESULT, f"{result.kind}: {result.summary}",
+                kind=str(result.kind), outcome=str(result.outcome),
+                candidate_hash=original_hash, contract_hash=verdict.contract_hash,
+                snapshot_hash=verdict.snapshot_hash, metrics=result.metrics,
+            )
+        events.append(
+            EventType.BASELINE_RESULT,
+            "원본이 계약을 만족합니다." if verdict.passed else "원본에 결함이 있습니다.",
+            passed=verdict.passed,
+            failed_checks=[str(r.kind) for r in verdict.failures],
+        )
 
     # ---- 판정 ----
-    if verdict.passed:
+    if verdict is not None and verdict.passed:
         status = RunStatus.VERIFIED_UNCHANGED
         needs_repair = False
         summary = "원본이 이미 계약을 만족하여 모델 호출 없이 종료합니다."
+    elif provider.classification.is_blocking:
+        # 코드를 고쳐서 해결될 문제가 아니다. 모델을 부르지 않는다 (AC-06).
+        status = (
+            RunStatus.NEEDS_USER_ACTION
+            if provider.classification is Classification.AUTH
+            else RunStatus.BUDGET_EXHAUSTED
+            if provider.classification is Classification.QUOTA
+            else RunStatus.EXTERNAL_UNAVAILABLE
+        )
+        needs_repair = False
+        summary = (
+            f"공급자 응답이 {provider.classification} 로 분류되었습니다 "
+            f"({provider.code}). 코드 수리 없이 종료합니다."
+        )
     elif outcome.denials and outcome.records is None:
         status = RunStatus.POLICY_BLOCKED
         needs_repair = False
@@ -291,8 +324,11 @@ def _execute(
         "broker_calls": broker.usage(), "sandbox_runs": 1,
     }
     manifest.save(paths, events)
+    # 종료 표시는 호출자(`recover`)가 한 번만 남긴다.
+    # 여기서도 남기면 events.jsonl 에 run_finished 가 두 번 찍혀
+    # replay 와 기록 무결성이 어긋난다.
     events.append(
-        EventType.RUN_FINISHED, summary,
+        EventType.BASELINE_RESULT, summary,
         status=str(status), model_calls=0, needs_repair=needs_repair,
     )
 

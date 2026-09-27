@@ -82,10 +82,11 @@ def recover(
             backend = NvidiaChatBackend(config, cancel_token=ledger.cancel)
             gateway = ModelGateway(backend=backend, ledger=ledger, config=config)
         except ModelUnavailable as exc:
+            # 종료 표시는 `_finalize` 가 한 번만 남긴다.
             session.events.append(
-                EventType.RUN_FINISHED,
+                EventType.PLAN_REVISED,
                 f"복구를 시도하지 않았습니다: {exc}",
-                status=str(RunStatus.NEEDS_USER_ACTION), model_calls=0,
+                reason="model_unavailable",
             )
             paths = _finalize(
                 session, RunStatus.NEEDS_USER_ACTION, None, ledger, scripted,

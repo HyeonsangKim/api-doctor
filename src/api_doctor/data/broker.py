@@ -82,6 +82,7 @@ class BrokerCall:
     outcome: str  # served | denied
     reason: str | None = None
     requested_range: tuple[int, int] | None = None
+    body: str = ""
 
     def sanitized(self) -> dict[str, Any]:
         """trace 열람용. 키 자리를 지운 경로만 남긴다."""
@@ -150,7 +151,8 @@ class DataBroker:
             return self._deny(url, params, f"동결 스냅샷에 없는 범위입니다: {start}~{end}")
 
         self.calls.append(
-            BrokerCall(url, params, "served", requested_range=(start, end))
+            BrokerCall(url, params, "served", requested_range=(start, end),
+                       body=entry["body"])
         )
         return {
             "status": 200,
@@ -197,6 +199,10 @@ class DataBroker:
                 start, end = call.requested_range
                 covered |= set(range(start, end + 1))
         return covered
+
+    def served_bodies(self) -> list[str]:
+        """실제로 후보에게 전달된 응답 본문. 공급자 응답 분류에 쓴다."""
+        return [c.body for c in self.calls if c.outcome == "served" and c.body]
 
     def trace(self) -> list[dict[str, Any]]:
         """`inspect_trace` 가 반환하는 정제된 요청 기록."""

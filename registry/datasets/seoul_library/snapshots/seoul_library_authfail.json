@@ -1,0 +1,77 @@
+{
+  "captured_with": "유효하지 않은 키로 실호출",
+  "collected_at": "2026-09-27T15:34:01Z",
+  "dataset_id": "seoul_library",
+  "note": "AC-06 시연용. 모든 범위가 실제 관측한 INFO-100 인증 오류를 돌려준다.",
+  "pages": {
+    "1:1": {
+      "body": "<RESULT><CODE>INFO-100</CODE><MESSAGE><![CDATA[인증키가 유효하지 않습니다.\n인증키가 없는 경우, 열린 데이터 광장 홈페이지에서 인증키를 신청하십시오.]]></MESSAGE></RESULT>",
+      "content_type": "application/xml"
+    },
+    "1:2": {
+      "body": "<RESULT><CODE>INFO-100</CODE><MESSAGE><![CDATA[인증키가 유효하지 않습니다.\n인증키가 없는 경우, 열린 데이터 광장 홈페이지에서 인증키를 신청하십시오.]]></MESSAGE></RESULT>",
+      "content_type": "application/xml"
+    },
+    "1:3": {
+      "body": "<RESULT><CODE>INFO-100</CODE><MESSAGE><![CDATA[인증키가 유효하지 않습니다.\n인증키가 없는 경우, 열린 데이터 광장 홈페이지에서 인증키를 신청하십시오.]]></MESSAGE></RESULT>",
+      "content_type": "application/xml"
+    },
+    "1:4": {
+      "body": "<RESULT><CODE>INFO-100</CODE><MESSAGE><![CDATA[인증키가 유효하지 않습니다.\n인증키가 없는 경우, 열린 데이터 광장 홈페이지에서 인증키를 신청하십시오.]]></MESSAGE></RESULT>",
+      "content_type": "application/xml"
+    },
+    "1:5": {
+      "body": "<RESULT><CODE>INFO-100</CODE><MESSAGE><![CDATA[인증키가 유효하지 않습니다.\n인증키가 없는 경우, 열린 데이터 광장 홈페이지에서 인증키를 신청하십시오.]]></MESSAGE></RESULT>",
+      "content_type": "application/xml"
+    },
+    "2:2": {
+      "body": "<RESULT><CODE>INFO-100</CODE><MESSAGE><![CDATA[인증키가 유효하지 않습니다.\n인증키가 없는 경우, 열린 데이터 광장 홈페이지에서 인증키를 신청하십시오.]]></MESSAGE></RESULT>",
+      "content_type": "application/xml"
+    },
+    "2:3": {
+      "body": "<RESULT><CODE>INFO-100</CODE><MESSAGE><![CDATA[인증키가 유효하지 않습니다.\n인증키가 없는 경우, 열린 데이터 광장 홈페이지에서 인증키를 신청하십시오.]]></MESSAGE></RESULT>",
+      "content_type": "application/xml"
+    },
+    "2:4": {
+      "body": "<RESULT><CODE>INFO-100</CODE><MESSAGE><![CDATA[인증키가 유효하지 않습니다.\n인증키가 없는 경우, 열린 데이터 광장 홈페이지에서 인증키를 신청하십시오.]]></MESSAGE></RESULT>",
+      "content_type": "application/xml"
+    },
+    "2:5": {
+      "body": "<RESULT><CODE>INFO-100</CODE><MESSAGE><![CDATA[인증키가 유효하지 않습니다.\n인증키가 없는 경우, 열린 데이터 광장 홈페이지에서 인증키를 신청하십시오.]]></MESSAGE></RESULT>",
+      "content_type": "application/xml"
+    },
+    "3:3": {
+      "body": "<RESULT><CODE>INFO-100</CODE><MESSAGE><![CDATA[인증키가 유효하지 않습니다.\n인증키가 없는 경우, 열린 데이터 광장 홈페이지에서 인증키를 신청하십시오.]]></MESSAGE></RESULT>",
+      "content_type": "application/xml"
+    },
+    "3:4": {
+      "body": "<RESULT><CODE>INFO-100</CODE><MESSAGE><![CDATA[인증키가 유효하지 않습니다.\n인증키가 없는 경우, 열린 데이터 광장 홈페이지에서 인증키를 신청하십시오.]]></MESSAGE></RESULT>",
+      "content_type": "application/xml"
+    },
+    "3:5": {
+      "body": "<RESULT><CODE>INFO-100</CODE><MESSAGE><![CDATA[인증키가 유효하지 않습니다.\n인증키가 없는 경우, 열린 데이터 광장 홈페이지에서 인증키를 신청하십시오.]]></MESSAGE></RESULT>",
+      "content_type": "application/xml"
+    },
+    "4:4": {
+      "body": "<RESULT><CODE>INFO-100</CODE><MESSAGE><![CDATA[인증키가 유효하지 않습니다.\n인증키가 없는 경우, 열린 데이터 광장 홈페이지에서 인증키를 신청하십시오.]]></MESSAGE></RESULT>",
+      "content_type": "application/xml"
+    },
+    "4:5": {
+      "body": "<RESULT><CODE>INFO-100</CODE><MESSAGE><![CDATA[인증키가 유효하지 않습니다.\n인증키가 없는 경우, 열린 데이터 광장 홈페이지에서 인증키를 신청하십시오.]]></MESSAGE></RESULT>",
+      "content_type": "application/xml"
+    },
+    "5:5": {
+      "body": "<RESULT><CODE>INFO-100</CODE><MESSAGE><![CDATA[인증키가 유효하지 않습니다.\n인증키가 없는 경우, 열린 데이터 광장 홈페이지에서 인증키를 신청하십시오.]]></MESSAGE></RESULT>",
+      "content_type": "application/xml"
+    }
+  },
+  "scope": {
+    "end": 5,
+    "start": 1
+  },
+  "scope_record_count": 5,
+  "service": "SeoulPublicLibraryInfo",
+  "service_total_count": 216,
+  "snapshot_id": "seoul_library_authfail",
+  "source_kind": "live_capture"
+}

@@ -207,3 +207,53 @@ def test_secret_in_code_blocks_before_any_transmission(cli, home, tmp_path) -> N
     assert result.exit_code == 2
     assert payload["error"]["code"] == "INVALID_INPUT"
     assert "전송하지 않았습니다" in payload["error"]["message"]
+
+
+@requires_docker
+def test_auth_error_stops_without_repair(cli, home) -> None:
+    """AC-06: 인증 만료는 코드 수리나 모델 호출 없이 끝난다.
+
+    스냅샷은 유효하지 않은 키로 실호출해 받은 INFO-100 응답이다.
+    """
+    result, payload = _run(
+        cli, "run", "-d", "seoul_library",
+        "-c", str(EXAMPLES / "connector_healthy.py"),
+        "--snapshot", "seoul_library_authfail",
+    )
+    assert payload["status"] == "needs_user_action"
+    assert payload["usage"]["model_calls"] == 0
+    assert payload["contributions"] == []
+    assert "v1.py" not in " ".join(payload["artifacts"]), "수리를 시도하면 안 된다"
+
+
+@requires_docker
+def test_auth_classification_precedes_verification(cli, home) -> None:
+    """인증이 막힌 응답으로 계약을 검증하는 것은 의미가 없다."""
+    _, payload = _run(
+        cli, "run", "-d", "seoul_library",
+        "-c", str(EXAMPLES / "connector_healthy.py"),
+        "--snapshot", "seoul_library_authfail",
+    )
+    run_dir = home / "runs" / payload["run_id"]
+    events = EventStore.read(run_dir)
+    classified = [
+        e for e in events
+        if e.type is EventType.BASELINE_RESULT
+        and e.data.get("classification") == "auth"
+    ]
+    assert classified, "공급자 응답 분류가 기록돼야 한다"
+    assert classified[0].data["code"] == "INFO-100"
+    assert not [e for e in events if e.type is EventType.CHECK_RESULT], \
+        "차단 분류에서는 고정 검증을 돌리지 않는다"
+
+
+@requires_docker
+def test_run_finished_is_recorded_exactly_once(cli, home) -> None:
+    """기록 무결성: 종료 표시는 한 번만 남는다."""
+    _, payload = _run(
+        cli, "run", "-d", "seoul_library", "-c", str(EXAMPLES / "connector_broken.py")
+    )
+    events = EventStore.read(home / "runs" / payload["run_id"])
+    finished = [e for e in events if e.type is EventType.RUN_FINISHED]
+    assert len(finished) == 1, f"run_finished 가 {len(finished)}번 찍혔습니다"
+    assert events[-1].type is EventType.RUN_FINISHED
