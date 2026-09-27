@@ -112,3 +112,55 @@ PRD §1.5 가 든 "인증 오류도 XML 로 온다 → 파싱 오류로 오인" 
 | Nemotron 의 tool roundtrip·구조화 반환·reasoning 상한 | 실호출 전까지 미확정 |
 | 크레딧 1건의 단위 (호출 / 토큰) | 예산 상한 재고정에 필요 |
 | KOSIS 키 조건 | 두 번째 데이터셋 후보 (Phase 3) |
+
+## 5. 기술 결정 기록 — main 의 하네스
+
+**결정**: deepagents 를 main 의 하네스로 **채택하지 않는다.** PRD §5.3.4 가 명시한
+대체안(동일 1+4 구조·도구 계약·LangGraph 상태를 유지하는 supervisor)을 쓴다.
+
+**근거 (deepagents 0.7.19, 2026-09-27 실측)**
+
+기본으로 9개 도구를 싣는다. `tools=[]` · `subagents=[]` 로도 제거되지 않는다.
+
+```
+기본값        ['delete','edit_file','execute','glob','grep','ls','read_file','task','write_file']
+tools=[]      (동일)
+subagents=[]  (동일)
+```
+
+`HarnessProfile(excluded_tools=[...])` 로 일부는 제거된다. 그러나 프로파일 키가
+**모델 spec/provider 에 묶여** 있고, 제거 결과는 다음과 같다.
+
+```
+제한 후       ['delete','edit_file','execute','get_budget','glob','grep','ls','read_file','write_file']
+제거된 것     task  (동적 위임 — 이것만 빠진다)
+남은 것       execute(셸) · write_file · delete · 파일시스템 전체
+```
+
+`execute` 와 파일시스템 도구는 `FilesystemMiddleware` 소속이고, 이 미들웨어는
+라이브러리의 **보호된 scaffolding** 이라 `excluded_middleware` 로 제외하면
+`ValueError` 가 난다.
+
+**이것이 왜 차단 사유인가**
+
+- AC-01 은 "등록된 위임 대상은 4개뿐이고 기본 general-purpose·동적 생성·하위
+  재위임을 사용할 수 없다"를 요구한다. `task` 는 제거되므로 이 부분은 만족한다.
+- 그러나 AC-07 은 "명세 조사자가 파일 변경을 요청하면 프롬프트와 무관한 실행
+  컨텍스트 권한으로 차단한다"를 요구한다. `execute` 와 `write_file` 이 남아 있으면
+  **모델이 도구 게이트웨이를 우회해 호스트에 직접 쓸 수 있다.** 이는 Zone T 와
+  Zone A 의 경계 자체를 무너뜨린다.
+- PRD §5.3.4 가 요구하는 "초기화 후 실제 tool inventory 검사"를 통과할 수 없다.
+
+**대신 채택한 것**
+
+main 과 네 전문가 모두 `model/gateway.py` 위의 제한된 agent loop 로 구현한다.
+이 경로의 이점은 부수적이 아니라 요구사항 직결이다 — FR-003 은 "모든 SDK 요청·
+자동 재시도·구조화 출력 재시도·요약·보조 모델은 동일 gateway 를 통과한다"를
+요구하는데, 외부 에이전트 프레임워크를 쓰면 그 내부 호출을 원장에 싣는 것을
+보장하기 어렵다. 직접 구현하면 **모델 호출 경로가 하나뿐**임이 자명하다.
+
+LangGraph 는 stage 상태기계와 중단 처리에 계속 쓴다. 1+4 구조·도구 계약·역할별
+가시성은 그대로다. **단일 에이전트로 축소하지 않는다.**
+
+> 이 판정은 deepagents 0.7.19 기준이다. 상위 버전에서 `FilesystemMiddleware` 를
+> 끌 수 있게 되면 재검토한다.

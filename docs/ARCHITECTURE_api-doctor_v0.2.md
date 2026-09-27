@@ -514,7 +514,9 @@ def evaluate(run: RunState) -> FinalStatus:
 
 ### 10.1 런타임 선택
 
-PRD §5.3.4의 우선안(deepagents)을 채택하되 **실측 검사로 보증**한다. deepagents는 기본적으로 파일시스템 도구·`task` 도구·general-purpose 서브에이전트를 제공하므로, 이것이 남아 있으면 AC-01이 즉시 실패한다.
+PRD §5.3.4의 우선안(deepagents)을 **실측 후 기각**했다. deepagents 0.7.19는 `execute`(셸)와 파일시스템 도구를 보호된 미들웨어로 싣고 있어 제거되지 않는다 — `excluded_tools`는 `task`만 걷어낸다. 모델이 도구 게이트웨이를 우회해 호스트에 쓸 수 있으므로 Zone T/A 경계가 성립하지 않는다. 실측 결과는 [Phase 0 기록 §5](PHASE0_keys_and_limits.md)에 있다.
+
+**채택안**: main과 네 전문가 모두 `model/gateway.py` 위의 제한된 agent loop다. PRD §5.3.4가 명시한 대체 경로이며, 1+4 구조·도구 계약·LangGraph 상태를 그대로 유지한다. 부수 효과가 아니라 요구사항 직결의 이점이 있다 — FR-003이 "모든 SDK 요청·재시도·구조화 출력 재시도가 동일 gateway를 통과"할 것을 요구하는데, 직접 구현하면 **모델 호출 경로가 하나뿐**임이 자명해진다.
 
 ```python
 # agents/inventory.py
