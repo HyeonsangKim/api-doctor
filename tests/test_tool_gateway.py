@@ -1,0 +1,141 @@
+"""도구 게이트웨이와 증거 가시성 (AC-01, AC-04, AC-07)."""
+
+from __future__ import annotations
+
+import pytest
+
+from api_doctor.runtime.budget import BudgetLedger
+from api_doctor.runtime.evidence import (
+    AUDIT, DIAG, MAIN, REPAIR, SPEC, EvidenceError, EvidenceKind, EvidenceStore,
+    Visibility, can_read,
+)
+from api_doctor.tools.gateway import (
+    ACTION_ACL, TOOL_ACL, Action, Lease, Tool, ToolContext, ToolError, ToolGateway,
+)
+
+ROLES = (MAIN, SPEC, DIAG, REPAIR, AUDIT)
+
+
+def _context(agent_id: str, candidate_hash: str = "sha256:v1") -> ToolContext:
+    return ToolContext(
+        run_id="run_x", task_id="task_x", agent_id=agent_id,
+        candidate_hash=candidate_hash, contract_hash="sha256:c",
+        snapshot_hash="sha256:s", lease=Lease(2, 1, 300.0),
+    )
+
+
+def test_exactly_five_agents_are_registered() -> None:
+    """AC-01: 등록된 주체는 main + 4 뿐이다."""
+    assert set(TOOL_ACL) == set(ROLES)
+    assert len(TOOL_ACL) == 5
+
+
+def test_only_main_can_delegate() -> None:
+    """AC-01: 하위 재위임·동적 생성은 구조적으로 불가능하다."""
+    assert ACTION_ACL[MAIN] == {Action.DELEGATE, Action.REVISE_PLAN}
+    for role in (SPEC, DIAG, REPAIR, AUDIT):
+        assert ACTION_ACL[role] == frozenset()
+        with pytest.raises(ToolError, match="재위임"):
+            _context(role).authorize_action(Action.DELEGATE)
+
+
+def test_only_repair_can_patch() -> None:
+    _context(REPAIR).authorize(Tool.SUBMIT_PATCH)
+    for role in (MAIN, SPEC, DIAG, AUDIT):
+        with pytest.raises(ToolError) as exc:
+            _context(role).authorize(Tool.SUBMIT_PATCH)
+        assert exc.value.code == "FORBIDDEN"
+
+
+def test_only_main_can_request_finish_or_stop() -> None:
+    """main 도 성공을 확정할 수 없고, 다른 역할은 요청조차 못 한다."""
+    for tool in (Tool.REQUEST_FINISH, Tool.REQUEST_STOP):
+        _context(MAIN).authorize(tool)
+        for role in (SPEC, DIAG, REPAIR, AUDIT):
+            with pytest.raises(ToolError):
+                _context(role).authorize(tool)
+
+
+def test_spec_researcher_cannot_touch_sandbox_or_code() -> None:
+    for tool in (Tool.RUN_PROBE, Tool.SUBMIT_PATCH, Tool.INSPECT_CODE):
+        with pytest.raises(ToolError):
+            _context(SPEC).authorize(tool)
+
+
+def test_forged_agent_id_in_arguments_is_ignored() -> None:
+    """AC-07: 모델이 role 값을 위조해도 실행 컨텍스트 권한으로 판정한다."""
+    ledger = BudgetLedger()
+    gateway = ToolGateway(ledger=ledger)
+    seen: list[str] = []
+
+    def impl(context: ToolContext, **kwargs) -> str:
+        seen.append(context.agent_id)
+        assert "agent_id" not in kwargs, "예약 인자가 구현까지 새면 안 된다"
+        return "ok"
+
+    gateway.register(Tool.RUN_PROBE, impl)
+    bound = gateway.bind(_context(AUDIT))
+    assert bound["run_probe"](agent_id="repair_engineer", probe_id="p") == "ok"
+    assert seen == [AUDIT], "인자로 넘긴 역할이 아니라 컨텍스트의 역할이 쓰여야 한다"
+
+
+def test_bind_only_exposes_permitted_tools() -> None:
+    """전문가는 자기 것이 아닌 도구의 이름조차 받지 않는다."""
+    gateway = ToolGateway(ledger=BudgetLedger())
+    for tool in Tool:
+        gateway.register(tool, lambda context, **kw: None)
+    assert "submit_patch" in gateway.bind(_context(REPAIR))
+    assert "submit_patch" not in gateway.bind(_context(AUDIT))
+    assert "delegate" not in gateway.bind(_context(AUDIT))
+
+
+def test_denied_tool_calls_are_logged() -> None:
+    gateway = ToolGateway(ledger=BudgetLedger())
+    gateway.register(Tool.SUBMIT_PATCH, lambda context, **kw: "patched")
+    bound = gateway.bind(_context(REPAIR))
+    bound["submit_patch"](diff="x")
+    entry = gateway.call_log[-1]
+    assert entry["allowed"] and entry["agent_id"] == REPAIR
+
+
+def test_auditor_cannot_see_repair_explanation(tmp_path) -> None:
+    """AC-04 / R-07: 감사 입력에 수리자의 설명이 유입되면 안 된다."""
+    store = EvidenceStore(tmp_path)
+    private = store.add(
+        kind=EvidenceKind.ASSERTION, visibility=Visibility.REPAIR_PRIVATE,
+        source="repair_engineer", created_by=REPAIR,
+        summary="왜 이렇게 고쳤는지", body={"reason": "중첩 경로"},
+    )
+    with pytest.raises(EvidenceError) as exc:
+        store.read(private.evidence_id, agent_id=AUDIT)
+    assert exc.value.code == "FORBIDDEN"
+    assert private.evidence_id not in {e.evidence_id for e in store.visible_to(AUDIT)}
+
+
+def test_nobody_can_read_verifier_expectations() -> None:
+    """기대값은 어떤 에이전트도 볼 수 없다."""
+    for role in ROLES:
+        assert not can_read(role, Visibility.VERIFIER_ONLY)
+
+
+def test_stale_evidence_is_refused_for_new_candidate(tmp_path) -> None:
+    """AC-13: 이전 hash 의 결과를 최신 검증으로 재사용하지 않는다."""
+    store = EvidenceStore(tmp_path)
+    observation = store.add(
+        kind=EvidenceKind.OBSERVATION, visibility=Visibility.RUNTIME_ONLY,
+        source="run_probe", created_by=DIAG, summary="v1 관측",
+        body={"rows": 10}, candidate_hash="sha256:v1",
+    )
+    store.read(observation.evidence_id, agent_id=AUDIT, candidate_hash="sha256:v1")
+    with pytest.raises(EvidenceError) as exc:
+        store.read(observation.evidence_id, agent_id=AUDIT, candidate_hash="sha256:v2")
+    assert exc.value.code == "STALE"
+
+
+def test_assertions_are_distinguished_from_observations(tmp_path) -> None:
+    """모델의 주장은 관측으로 승격되지 않는다 (PRD §5.2)."""
+    store = EvidenceStore(tmp_path)
+    store.add(kind=EvidenceKind.ASSERTION, visibility=Visibility.PUBLIC,
+              source="model", created_by=AUDIT, summary="괜찮아 보입니다",
+              body={"claim": "no issue"}, candidate_hash="sha256:v1")
+    assert store.observations_for("sha256:v1") == []
