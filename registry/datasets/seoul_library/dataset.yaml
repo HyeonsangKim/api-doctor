@@ -1,0 +1,39 @@
+# 지원 데이터셋 등록 (FR-001)
+#
+# 출처 표기 원칙: 이 파일의 provenance 는 **실제로 한 일**만 적는다.
+# 아직 공식 API 를 호출한 적이 없으므로 source_kind 는 synthetic_fixture 다.
+# 실제 수집 후에는 live_capture 로 바꾸고 collected_at 을 채운다.
+
+dataset_id: seoul_library
+display_name: 서울 공공도서관 현황정보
+contract_id: seoul_library_scope
+contract_version: v1
+
+# live 수집 준비 여부. 키·HTTPS·범위가 확인되기 전에는 거짓이다.
+live_ready: false
+live_blockers:
+  - 공식 API key 미발급
+  - 실제 서비스명·필드·페이지 지원 여부 미확인 (PRD §3.1)
+
+provenance:
+  source_kind: synthetic_fixture
+  authored_by: 개발자 작성
+  modeled_on: 서울 열린데이터광장 OpenAPI 의 공개된 응답 형태
+  reference_url: https://data.seoul.go.kr/dataList/OA-15480/A/1/datasetView.do
+  collected_at: null
+  license_note: >-
+    합성 fixture 이므로 재배포 제약이 없다. 실제 응답으로 교체할 때는
+    원문 재배포 가능 여부를 별도 확인하고 출처를 표시한다.
+
+# 후보와 collector 가 접근할 수 있는 유일한 endpoint 목록.
+# 모델은 이 값을 쓰지 못하고 broker 가 대조만 한다.
+allowed_endpoints:
+  - method: GET
+    url_prefix: https://openapi.seoul.go.kr:8088/
+    allowed_params: [page, per_page, scope_id]
+
+# 문서 탐색 허용 도메인 (FR-004)
+allowed_doc_domains:
+  - data.seoul.go.kr
+
+skill: seoul_library

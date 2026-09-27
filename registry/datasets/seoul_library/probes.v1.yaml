@@ -1,0 +1,29 @@
+# probe catalog (FR-011, PRD §3.2)
+#
+# 감사자는 여기서 probe_id 와 허용 파라미터를 고른다. 기대값을 만들거나
+# 임의 Python 을 실행하지 않는다. coverage 는 고정 metadata 이며
+# 모델이 바꿀 수 없다.
+
+version: v1
+
+probes:
+  - probe_id: baseline_full_scope
+    description: 계약의 주 query 를 그대로 실행한다
+    params: {scope_id: all}
+    covers: []          # baseline 은 감사 coverage 로 세지 않는다
+    is_baseline: true
+
+  - probe_id: page_partition
+    description: 페이지 크기를 바꿔 같은 전체 집합이 나오는지 본다
+    params: {scope_id: all, per_page: 5}
+    covers: [pagination_boundary]
+
+  - probe_id: boundary_last_page
+    description: 마지막 페이지만 요청해 종료 조건 처리를 관측한다
+    params: {scope_id: all, page: 3}
+    covers: [pagination_boundary]
+
+  - probe_id: field_presence_sample
+    description: 첫 페이지에서 필수 필드 보존을 관측한다
+    params: {scope_id: all, page: 1}
+    covers: [mapping_preservation]

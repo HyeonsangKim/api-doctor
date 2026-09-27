@@ -1,0 +1,229 @@
+{
+  "collected_at": null,
+  "dataset_id": "seoul_library",
+  "default_per_page": 5,
+  "pages": {
+    "10:1": {
+      "SeoulLibraryInfo": {
+        "RESULT": {
+          "CODE": "INFO-000",
+          "MESSAGE": "정상 처리되었습니다"
+        },
+        "list_total_count": 12,
+        "row": [
+          {
+            "ADRES": "중구 세종대로 110",
+            "LBRRY_NAME": "서울도서관",
+            "LBRRY_SEQ_NO": "1",
+            "TEL_NO": "02-2133-0300"
+          },
+          {
+            "ADRES": "강남구 학동로 425",
+            "LBRRY_NAME": "강남도서관",
+            "LBRRY_SEQ_NO": "2",
+            "TEL_NO": "02-3448-4741"
+          },
+          {
+            "ADRES": "강동구 양재대로 1428",
+            "LBRRY_NAME": "강동도서관",
+            "LBRRY_SEQ_NO": "3",
+            "TEL_NO": "02-488-2001"
+          },
+          {
+            "ADRES": "강남구 논현로 6",
+            "LBRRY_NAME": "개포도서관",
+            "LBRRY_SEQ_NO": "4",
+            "TEL_NO": "02-575-1450"
+          },
+          {
+            "ADRES": "강동구 고덕로 351",
+            "LBRRY_NAME": "고덕평생학습관",
+            "LBRRY_SEQ_NO": "5",
+            "TEL_NO": "02-6956-8000"
+          },
+          {
+            "ADRES": "구로구 구로중앙로 174",
+            "LBRRY_NAME": "구로도서관",
+            "LBRRY_SEQ_NO": "6",
+            "TEL_NO": "02-861-3529"
+          },
+          {
+            "ADRES": "용산구 소월로 109",
+            "LBRRY_NAME": "남산도서관",
+            "LBRRY_SEQ_NO": "7",
+            "TEL_NO": "02-754-7338"
+          },
+          {
+            "ADRES": "노원구 덕릉로 460",
+            "LBRRY_NAME": "노원평생학습관",
+            "LBRRY_SEQ_NO": "8",
+            "TEL_NO": "02-2116-3700"
+          },
+          {
+            "ADRES": "도봉구 덕릉로 460",
+            "LBRRY_NAME": "도봉도서관",
+            "LBRRY_SEQ_NO": "9",
+            "TEL_NO": "02-999-6800"
+          },
+          {
+            "ADRES": "동대문구 천호대로 4길 27",
+            "LBRRY_NAME": "동대문도서관",
+            "LBRRY_SEQ_NO": "10",
+            "TEL_NO": "02-2248-9500"
+          }
+        ]
+      }
+    },
+    "10:2": {
+      "SeoulLibraryInfo": {
+        "RESULT": {
+          "CODE": "INFO-000",
+          "MESSAGE": "정상 처리되었습니다"
+        },
+        "list_total_count": 12,
+        "row": [
+          {
+            "ADRES": "마포구 홍익로2길 16",
+            "LBRRY_NAME": "마포평생학습관",
+            "LBRRY_SEQ_NO": "11",
+            "TEL_NO": "02-3153-5300"
+          },
+          {
+            "ADRES": "종로구 북촌로5길 48",
+            "LBRRY_NAME": "정독도서관",
+            "LBRRY_SEQ_NO": "12",
+            "TEL_NO": "02-2011-5799"
+          }
+        ]
+      }
+    },
+    "10:3": {
+      "SeoulLibraryInfo": {
+        "RESULT": {
+          "CODE": "INFO-000",
+          "MESSAGE": "정상 처리되었습니다"
+        },
+        "list_total_count": 12,
+        "row": []
+      }
+    },
+    "5:1": {
+      "SeoulLibraryInfo": {
+        "RESULT": {
+          "CODE": "INFO-000",
+          "MESSAGE": "정상 처리되었습니다"
+        },
+        "list_total_count": 12,
+        "row": [
+          {
+            "ADRES": "중구 세종대로 110",
+            "LBRRY_NAME": "서울도서관",
+            "LBRRY_SEQ_NO": "1",
+            "TEL_NO": "02-2133-0300"
+          },
+          {
+            "ADRES": "강남구 학동로 425",
+            "LBRRY_NAME": "강남도서관",
+            "LBRRY_SEQ_NO": "2",
+            "TEL_NO": "02-3448-4741"
+          },
+          {
+            "ADRES": "강동구 양재대로 1428",
+            "LBRRY_NAME": "강동도서관",
+            "LBRRY_SEQ_NO": "3",
+            "TEL_NO": "02-488-2001"
+          },
+          {
+            "ADRES": "강남구 논현로 6",
+            "LBRRY_NAME": "개포도서관",
+            "LBRRY_SEQ_NO": "4",
+            "TEL_NO": "02-575-1450"
+          },
+          {
+            "ADRES": "강동구 고덕로 351",
+            "LBRRY_NAME": "고덕평생학습관",
+            "LBRRY_SEQ_NO": "5",
+            "TEL_NO": "02-6956-8000"
+          }
+        ]
+      }
+    },
+    "5:2": {
+      "SeoulLibraryInfo": {
+        "RESULT": {
+          "CODE": "INFO-000",
+          "MESSAGE": "정상 처리되었습니다"
+        },
+        "list_total_count": 12,
+        "row": [
+          {
+            "ADRES": "구로구 구로중앙로 174",
+            "LBRRY_NAME": "구로도서관",
+            "LBRRY_SEQ_NO": "6",
+            "TEL_NO": "02-861-3529"
+          },
+          {
+            "ADRES": "용산구 소월로 109",
+            "LBRRY_NAME": "남산도서관",
+            "LBRRY_SEQ_NO": "7",
+            "TEL_NO": "02-754-7338"
+          },
+          {
+            "ADRES": "노원구 덕릉로 460",
+            "LBRRY_NAME": "노원평생학습관",
+            "LBRRY_SEQ_NO": "8",
+            "TEL_NO": "02-2116-3700"
+          },
+          {
+            "ADRES": "도봉구 덕릉로 460",
+            "LBRRY_NAME": "도봉도서관",
+            "LBRRY_SEQ_NO": "9",
+            "TEL_NO": "02-999-6800"
+          },
+          {
+            "ADRES": "동대문구 천호대로 4길 27",
+            "LBRRY_NAME": "동대문도서관",
+            "LBRRY_SEQ_NO": "10",
+            "TEL_NO": "02-2248-9500"
+          }
+        ]
+      }
+    },
+    "5:3": {
+      "SeoulLibraryInfo": {
+        "RESULT": {
+          "CODE": "INFO-000",
+          "MESSAGE": "정상 처리되었습니다"
+        },
+        "list_total_count": 12,
+        "row": [
+          {
+            "ADRES": "마포구 홍익로2길 16",
+            "LBRRY_NAME": "마포평생학습관",
+            "LBRRY_SEQ_NO": "11",
+            "TEL_NO": "02-3153-5300"
+          },
+          {
+            "ADRES": "종로구 북촌로5길 48",
+            "LBRRY_NAME": "정독도서관",
+            "LBRRY_SEQ_NO": "12",
+            "TEL_NO": "02-2011-5799"
+          }
+        ]
+      }
+    },
+    "5:4": {
+      "SeoulLibraryInfo": {
+        "RESULT": {
+          "CODE": "INFO-000",
+          "MESSAGE": "정상 처리되었습니다"
+        },
+        "list_total_count": 12,
+        "row": []
+      }
+    }
+  },
+  "snapshot_id": "seoul_library_synthetic_v1",
+  "source_kind": "synthetic_fixture",
+  "total": 12
+}
