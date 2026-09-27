@@ -14,7 +14,8 @@ import typer
 from rich.console import Console
 
 from ..registry.loader import RegistryInvalid, load_registry
-from ..runtime.baseline import InputError, run_baseline
+from ..runtime.baseline import InputError
+from ..runtime.recover import recover
 from ..runtime.events import Event, EventStore, RunStatus, verify_sequence
 from ..runtime.store import Manifest, Resolution, RunStore, StoreError
 from .preflight import run_preflight
@@ -122,7 +123,7 @@ def run(
             err.print(format_event(event))
 
     try:
-        result = run_baseline(
+        result = recover(
             dataset_id=dataset, code_path=code, snapshot_id=snapshot,
             source=source, on_event=on_event,
         )
@@ -133,35 +134,51 @@ def run(
         _fail(exc.code, str(exc), 5, as_json)
         return
 
+    baseline = result.baseline
+    session = baseline.session
+
     if not as_json:
         err.print()
-        if result.verdict is not None:
-            print_verdict(err, result.verdict)
-        print_denials(err, result.denials)
-        err.print(f"\n{status_text(result.status)}  [dim]{result.run_id}[/]")
-        if result.needs_repair:
-            err.print(
-                "[dim]전문 에이전트 위임은 M2 에서 구현합니다. "
-                "현재는 결함 확인까지 수행했습니다.[/]"
-            )
-        err.print(f"[dim]기록: {result.paths.run_dir}[/]")
+        verdict = (session.final_verdict if session and session.final_verdict
+                   else baseline.verdict)
+        if verdict is not None:
+            print_verdict(err, verdict)
+        if result.orchestration:
+            err.print()
+            for run in result.orchestration.delegations:
+                tools = ", ".join(run.tool_calls) or "도구 없음"
+                err.print(f"  [bold]{run.envelope.agent_id}[/] "
+                          f"[dim]{run.result.outcome} · {tools}[/]")
+                err.print(f"    {sanitize(run.result.summary)[:90]}")
+        print_denials(err, result.baseline.denials + (session.denials if session else []))
+        err.print(f"\n{status_text(result.status)}  [dim]{result.baseline.run_id}[/]")
+        if not result.model_available:
+            err.print(f"[yellow]복구를 시도하지 않았습니다[/] {result.model_error}")
+        if result.report_paths:
+            err.print(f"[dim]보고서: {result.report_paths[0]}[/]")
 
+    usage = session.ledger.usage() if session else {}
     _emit({
-        "run_id": result.run_id,
+        "run_id": result.baseline.run_id,
         "status": str(result.status),
         "source": source,
-        "candidate_hash": result.manifest.hashes.get("original"),
+        "candidate_hash": session.current_hash if session else None,
         "verification": {
-            "contract_version": result.manifest.hashes.get("contract"),
-            "gate": "passed" if (result.verdict and result.verdict.passed) else "failed",
-            "checks": result.verdict.to_json()["checks"] if result.verdict else [],
+            "contract_version": baseline.manifest.hashes.get("contract"),
+            "gate": "passed" if result.status.is_success else "failed",
+            "checks": (
+                (session.final_verdict or baseline.verdict).to_json()["checks"]
+                if session and (session.final_verdict or baseline.verdict) else []
+            ),
         },
-        "usage": result.manifest.usage,
-        "artifacts": sorted(
-            str(p.relative_to(result.paths.run_dir))
-            for p in result.paths.run_dir.rglob("*") if p.is_file()
-        ),
-        "error": result.error,
+        "contributions": [
+            {"agent_id": r.envelope.agent_id, "outcome": str(r.result.outcome),
+             "tools_used": r.tool_calls}
+            for r in (result.orchestration.delegations if result.orchestration else [])
+        ],
+        "usage": usage,
+        "artifacts": result.artifacts,
+        "error": result.model_error or baseline.error,
     }, as_json)
     raise typer.Exit(result.status.exit_code)
 

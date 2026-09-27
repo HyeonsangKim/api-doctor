@@ -17,9 +17,12 @@ from typing import Any
 from ..data.broker import DataBroker, Snapshot, SnapshotInvalid
 from ..registry.loader import Dataset, RegistryInvalid, load_registry
 from ..sandbox.base import Denial, SandboxLimits, SandboxOutcome
-from ..sandbox.selftest import BackendSelection, RuntimeUnavailable, select_backend
+from ..sandbox.selftest import BackendSelection, RuntimeUnavailable, select_backend  # noqa: F401
 from ..verify.verifier import FixedVerifier, Verdict, load_verifier
+from .budget import BudgetLedger
+from .evidence import EvidenceStore
 from .events import EventStore, EventType, RunStatus, Stage
+from .session import RunSession
 from .store import Manifest, RunPaths, RunStore, acquire_lock, release_lock, utc_iso
 
 MAX_CODE_BYTES = 100 * 1024
@@ -44,6 +47,10 @@ class BaselineResult:
     needs_repair: bool = False
     error: str | None = None
     denials: list[Denial] = field(default_factory=list)
+    session: "RunSession | None" = None
+    selection: "BackendSelection | None" = None
+    snapshot: "Snapshot | None" = None
+    dataset: "Dataset | None" = None
 
 
 def sha256_file(path: Path) -> str:
@@ -97,11 +104,13 @@ def run_baseline(
     store: RunStore | None = None,
     registry_root: Path | None = None,
     limits: SandboxLimits | None = None,
+    ledger: "BudgetLedger | None" = None,
     on_event: Any = None,
 ) -> BaselineResult:
     """입력 검사 → 격리 검증 → 자료 동결 → baseline 판정."""
     store = store or RunStore()
     limits = limits or SandboxLimits()
+    ledger = ledger or BudgetLedger()
 
     # ---- 레지스트리 (코드 실행 전) ----
     try:
@@ -144,7 +153,7 @@ def run_baseline(
         return _execute(
             run_id=run_id, paths=paths, events=events, dataset=dataset,
             snapshot=snapshot, selection=selection, code_path=code_path,
-            limits=limits, source=source,
+            limits=limits, source=source, ledger=ledger,
         )
     finally:
         release_lock(paths)
@@ -178,11 +187,12 @@ def _execute(
     code_path: Path,
     limits: SandboxLimits,
     source: str,
+    ledger: "BudgetLedger",
 ) -> BaselineResult:
     # 원본을 읽기 전용 복사한다. 원본은 import 하지도 실행하지도 않는다.
     original = paths.candidates / "original.py"
     original.write_bytes(code_path.read_bytes())
-    original.chmod(0o400)
+    original.chmod(0o600)   # register_candidate 가 다시 쓰고 0400 으로 잠근다
     original_hash = sha256_file(original)
 
     hashes = {
@@ -222,6 +232,12 @@ def _execute(
     outcome = selection.backend.run_candidate(
         original, dataset.contract.query, broker.respond, limits
     )
+    ledger.spend_sandbox_run()
+    for _ in range(broker.call_count):
+        try:
+            ledger.spend_broker_call()
+        except Exception:  # noqa: BLE001 - 상한은 다음 판정에서 걸린다
+            break
     events.append(
         EventType.SANDBOX_RUN,
         f"원본을 격리 실행했습니다 ({outcome.duration_ms}ms).",
@@ -280,10 +296,23 @@ def _execute(
         status=str(status), model_calls=0, needs_repair=needs_repair,
     )
 
+    session = RunSession(
+        run_id=run_id, paths=paths, events=events, ledger=ledger,
+        evidence=EvidenceStore(paths.run_dir), dataset=dataset, snapshot=snapshot,
+        backend=selection.backend, verifier=verifier, limits=limits,
+    )
+    session.register_candidate(
+        source=original.read_text(encoding="utf-8"), version=0,
+        base_hash=None, author="operator",
+    )
+    session.denials.extend(outcome.denials)
+    session.last_broker_usage = broker.usage()
+
     return BaselineResult(
         run_id=run_id, status=status, verdict=verdict, outcome=outcome,
         paths=paths, manifest=manifest, needs_repair=needs_repair,
         error=outcome.error, denials=list(outcome.denials),
+        session=session, selection=selection, snapshot=snapshot, dataset=dataset,
     )
 
 
