@@ -24,10 +24,40 @@ def _context(agent_id: str, candidate_hash: str = "sha256:v1") -> ToolContext:
     )
 
 
-def test_exactly_five_agents_are_registered() -> None:
-    """AC-01: 등록된 주체는 main + 4 뿐이다."""
-    assert set(TOOL_ACL) == set(ROLES)
-    assert len(TOOL_ACL) == 5
+def test_product_team_is_exactly_main_plus_four() -> None:
+    """AC-01: 제품 팀은 main + 4 뿐이다.
+
+    비교 실험 B 의 단일 에이전트는 팀 밖의 대조군이므로 여기서 제외한다.
+    그것이 위임 대상이 아니라는 것은 아래 테스트가 따로 확인한다.
+    """
+    from api_doctor.agents.inventory import CONTROL_AGENTS
+
+    team = set(TOOL_ACL) - set(CONTROL_AGENTS)
+    assert team == set(ROLES)
+    assert len(team) == 5
+
+
+def test_control_agent_is_not_part_of_the_team() -> None:
+    """대조군은 위임 대상도 아니고 위임하지도 못한다 (PRD §7.3)."""
+    from api_doctor.agents.inventory import (
+        CONTROL_AGENTS, DELEGATION_TARGETS, REGISTERED_AGENTS,
+    )
+
+    for control in CONTROL_AGENTS:
+        assert control not in REGISTERED_AGENTS
+        assert control not in DELEGATION_TARGETS
+        assert ACTION_ACL.get(control) == frozenset()
+        with pytest.raises(ToolError):
+            _context(control).authorize_action(Action.DELEGATE)
+
+
+def test_control_agent_still_cannot_see_expectations() -> None:
+    """같은 자료를 주되 정답은 주지 않는다."""
+    from api_doctor.agents.inventory import CONTROL_AGENTS
+    from api_doctor.runtime.evidence import Visibility, can_read
+
+    for control in CONTROL_AGENTS:
+        assert not can_read(control, Visibility.VERIFIER_ONLY)
 
 
 def test_only_main_can_delegate() -> None:

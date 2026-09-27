@@ -116,7 +116,7 @@ def run(
     snapshot: Annotated[str | None, typer.Option("--snapshot", help="동결 스냅샷 ID")] = None,
     source: Annotated[str, typer.Option("--source", help="fixture | live")] = "fixture",
     harness: Annotated[str, typer.Option(
-        "--harness", help="deepagents | builtin")] = "deepagents",
+        "--harness", help="deepagents | builtin | single")] = "deepagents",
     as_json: Annotated[bool, typer.Option("--json", help="JSON 으로 출력")] = False,
 ) -> None:
     """깨진 연결을 복구한다."""

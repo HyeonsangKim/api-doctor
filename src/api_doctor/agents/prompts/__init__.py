@@ -135,7 +135,10 @@ RECOVERY_LEAD = """너는 공공 API 연결 복구 팀의 메인 에이전트다
 그 정보만으로 판단한다.
 """
 
+from .single import SINGLE_AGENT
+
 BY_AGENT = {
+    "single_agent": SINGLE_AGENT,
     "main": RECOVERY_LEAD,
     "spec_researcher": SPEC_RESEARCHER,
     "runtime_diagnostician": RUNTIME_DIAGNOSTICIAN,

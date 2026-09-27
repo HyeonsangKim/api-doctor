@@ -22,6 +22,7 @@ from .budget import BudgetLedger, Cancelled
 from .events import EventType, RunStatus, Stage
 from .deep_loop import orchestrate_deep
 from .orchestrator import OrchestrationResult, orchestrate
+from .single_loop import orchestrate_single
 from .store import RunStore, utc_iso
 
 
@@ -105,7 +106,11 @@ def recover(
         **call.to_json(),
     )
 
-    runner = orchestrate_deep if harness == "deepagents" else orchestrate
+    runner = {
+        "deepagents": orchestrate_deep,
+        "builtin": orchestrate,
+        "single": orchestrate_single,
+    }.get(harness, orchestrate_deep)
     session.events.append(
         EventType.STAGE_CHANGED, f"하네스: {harness}",
         harness=harness,

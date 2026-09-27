@@ -23,6 +23,7 @@ SPEC = "spec_researcher"
 DIAG = "runtime_diagnostician"
 REPAIR = "repair_engineer"
 AUDIT = "data_auditor"
+SINGLE = "single_agent"   # 비교 실험 B
 
 
 class EvidenceKind(StrEnum):
@@ -41,11 +42,13 @@ class Visibility(StrEnum):
     VERIFIER_ONLY = "verifier_only"  # 어떤 에이전트도 못 본다
 
 
+# 단일 에이전트(B)는 네 역할의 자료를 모두 본다. 정보 차이로 팀(C)을
+# 유리하게 만들지 않기 위해서다 (PRD §7.3). 기대값만은 여전히 못 본다.
 _READERS: dict[Visibility, frozenset[str]] = {
-    Visibility.PUBLIC: frozenset({MAIN, SPEC, DIAG, REPAIR, AUDIT}),
-    Visibility.SPEC_ONLY: frozenset({MAIN, SPEC}),
-    Visibility.RUNTIME_ONLY: frozenset({MAIN, DIAG, REPAIR, AUDIT}),
-    Visibility.REPAIR_PRIVATE: frozenset({MAIN, REPAIR}),
+    Visibility.PUBLIC: frozenset({MAIN, SPEC, DIAG, REPAIR, AUDIT, SINGLE}),
+    Visibility.SPEC_ONLY: frozenset({MAIN, SPEC, SINGLE}),
+    Visibility.RUNTIME_ONLY: frozenset({MAIN, DIAG, REPAIR, AUDIT, SINGLE}),
+    Visibility.REPAIR_PRIVATE: frozenset({MAIN, REPAIR, SINGLE}),
     Visibility.MAIN_ONLY: frozenset({MAIN}),
     Visibility.VERIFIER_ONLY: frozenset(),
 }

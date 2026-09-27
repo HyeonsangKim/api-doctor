@@ -26,6 +26,9 @@ AGENT_IDS = (
     "data_auditor",
 )
 
+# 비교 실험 B 의 단일 에이전트. 제품 구조에 포함되지 않는다.
+SINGLE_AGENT = "single_agent"
+
 
 class Resource(StrEnum):
     MODEL_CALLS = "model_calls"
@@ -134,6 +137,8 @@ class Limits:
         default_factory=lambda: {
             "main": 8, "spec_researcher": 4, "runtime_diagnostician": 4,
             "repair_engineer": 4, "data_auditor": 4,
+            # 비교 실험 B: 팀 전체와 **같은 총량**을 준다 (PRD §7.3).
+            "single_agent": 24,
         }
     )
     role_delegations: int = 2
@@ -141,7 +146,7 @@ class Limits:
     max_output_tokens: dict[str, int] = field(
         default_factory=lambda: {
             "main": 2048, "spec_researcher": 2048, "runtime_diagnostician": 2048,
-            "data_auditor": 2048, "repair_engineer": 4096,
+            "data_auditor": 2048, "repair_engineer": 4096, "single_agent": 4096,
         }
     )
     model_http_seconds: float = 45.0
@@ -177,10 +182,10 @@ class BudgetLedger:
     patches: int = 0
 
     role_calls: dict[str, int] = field(
-        default_factory=lambda: dict.fromkeys(AGENT_IDS, 0)
+        default_factory=lambda: dict.fromkeys((*AGENT_IDS, SINGLE_AGENT), 0)
     )
     role_delegations: dict[str, int] = field(
-        default_factory=lambda: dict.fromkeys(AGENT_IDS, 0)
+        default_factory=lambda: dict.fromkeys((*AGENT_IDS, SINGLE_AGENT), 0)
     )
 
     # 종료 검증용 예약 슬롯. 새 위임이 이것을 소비할 수 없다.

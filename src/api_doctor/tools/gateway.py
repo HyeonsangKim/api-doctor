@@ -59,11 +59,21 @@ TOOL_ACL: dict[str, frozenset[Tool]] = {
     }),
 }
 
+# 비교 실험 B (PRD §7.3): 같은 도구·자료·예산·검증을 가진 단일 에이전트.
+# 정보 차이로 팀(C)을 유리하게 만들지 않기 위해 네 역할의 도구를 모두 준다.
+SINGLE = "single_agent"
+TOOL_ACL[SINGLE] = frozenset({
+    Tool.SEARCH_SPEC, Tool.INSPECT_CODE, Tool.INSPECT_TRACE, Tool.RUN_PROBE,
+    Tool.SUBMIT_PATCH, Tool.READ_EVIDENCE, Tool.GET_BUDGET,
+    Tool.REQUEST_FINISH, Tool.REQUEST_STOP,
+})
+
 # 행동은 main 만 가진다. 그래서 하위 재위임이 구조적으로 불가능하다 (AC-01).
 ACTION_ACL: dict[str, frozenset[Action]] = {
     MAIN: frozenset({Action.DELEGATE, Action.REVISE_PLAN}),
     SPEC: frozenset(), DIAG: frozenset(),
     REPAIR: frozenset(), AUDIT: frozenset(),
+    SINGLE: frozenset(),   # 단일 에이전트는 위임하지 않는다
 }
 
 
