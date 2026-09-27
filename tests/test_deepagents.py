@@ -303,3 +303,72 @@ def test_rejected_delegation_is_recorded_as_evidence(tmp_path) -> None:
     blocked = [d for d in result.delegations if str(d.result.outcome) == "blocked"]
     assert blocked, "거절된 위임이 기록에 남아야 한다"
     assert "FORBIDDEN" in blocked[0].result.summary
+
+
+# ---------------------------------------------------------------- 재계획
+
+
+@requires_docker
+def test_different_problems_take_different_paths(tmp_path) -> None:
+    """AC-03: 모든 사례에 같은 수리 순서를 강제하지 않는다.
+
+    문제가 다르면 main 이 고르는 위임 경로도 달라져야 한다.
+    """
+    from _harness import connector, j
+
+    # 경로 A: 명세부터 확인하고 수리한다
+    session_a = make_session(tmp_path / "a")
+    result_a, _ = _run_script(session_a, [
+        j({"tool": "task", "args": {"subagent_type": "spec_researcher",
+                                    "description": "응답 구조 확인"}}),
+        j({"tool": "search_spec", "args": {"question": "중첩 경로"}}),
+        j({"outcome": "completed", "summary": "구조 확인"}),
+        j({"outcome": "completed", "summary": "끝"}),
+    ])
+
+    # 경로 B: 명세를 건너뛰고 바로 진단한다
+    session_b = make_session(tmp_path / "b")
+    result_b, _ = _run_script(session_b, [
+        j({"tool": "task", "args": {"subagent_type": "runtime_diagnostician",
+                                    "description": "실패 지점 관측"}}),
+        j({"tool": "run_probe", "args": {"probe_id": "range_coverage"}}),
+        j({"outcome": "completed", "summary": "위치 누락 확인"}),
+        j({"outcome": "completed", "summary": "끝"}),
+    ])
+
+    path_a = [d.agent_id for d in result_a.delegations]
+    path_b = [d.agent_id for d in result_b.delegations]
+    assert path_a != path_b, "서로 다른 문제가 같은 경로를 강제받았다"
+    assert path_a == ["spec_researcher"]
+    assert path_b == ["runtime_diagnostician"]
+
+
+@requires_docker
+def test_redelegation_with_a_new_question_is_allowed(tmp_path) -> None:
+    """AC-03: 구체적인 새 질문이면 같은 역할에 다시 위임할 수 있다.
+
+    중복 거절은 **같은** 질문일 때만이다.
+    """
+    from _harness import j
+
+    session = make_session(tmp_path)
+    result, _ = _run_script(session, [
+        j({"tool": "task", "args": {"subagent_type": "spec_researcher",
+                                    "description": "레코드 배열이 어느 경로에 있는가"}}),
+        j({"tool": "search_spec", "args": {"question": "중첩 경로"}}),
+        j({"outcome": "completed", "summary": "SeoulPublicLibraryInfo.row 다."}),
+        j({"tool": "task", "args": {"subagent_type": "spec_researcher",
+                                    "description": "범위 종료 조건은 무엇으로 판단하는가"}}),
+        j({"tool": "search_spec", "args": {"question": "범위 종료"}}),
+        j({"outcome": "completed", "summary": "cursor 가 end 를 넘을 때까지."}),
+        j({"outcome": "completed", "summary": "끝"}),
+    ])
+    spec_runs = [d for d in result.delegations if d.agent_id == "spec_researcher"]
+    assert len(spec_runs) == 2, "새 질문의 재위임이 거절됐다"
+    assert session.ledger.role_delegations["spec_researcher"] == 2
+
+    rejected = [
+        e for e in session.events.read(session.paths.run_dir)
+        if e.type is EventType.DELEGATION_REJECTED
+    ]
+    assert not rejected, "다른 질문인데 중복으로 판정됐다"

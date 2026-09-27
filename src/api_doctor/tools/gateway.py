@@ -155,6 +155,7 @@ class ToolGateway:
 
     def _wrap(self, tool: Tool, impl: ToolImpl, context: ToolContext) -> ToolImpl:
         def invoke(**kwargs: Any) -> Any:
+            started_ms = int(self.ledger.elapsed * 1000)
             # 모델이 컨텍스트 필드를 인자로 밀어 넣어도 무시한다.
             for reserved in ("agent_id", "run_id", "task_id", "_context"):
                 kwargs.pop(reserved, None)
@@ -164,12 +165,15 @@ class ToolGateway:
                 context.authorize(tool)
                 result = impl(context, **kwargs)
             except ToolError as exc:
-                self._record(tool, context, allowed=False, reason=exc.code)
+                self._record(tool, context, allowed=False, reason=exc.code,
+                             started_ms=started_ms)
                 raise
             except TypeError as exc:
-                self._record(tool, context, allowed=False, reason="INVALID_ARGS")
+                self._record(tool, context, allowed=False, reason="INVALID_ARGS",
+                             started_ms=started_ms)
                 raise ToolError("INVALID_ARGS", f"{tool} 인자 오류: {exc}") from exc
-            self._record(tool, context, allowed=True, reason=None)
+            self._record(tool, context, allowed=True, reason=None,
+                         started_ms=started_ms)
             return result
 
         invoke.__name__ = str(tool)
@@ -177,7 +181,8 @@ class ToolGateway:
         return invoke
 
     def _record(
-        self, tool: Tool, context: ToolContext, *, allowed: bool, reason: str | None
+        self, tool: Tool, context: ToolContext, *, allowed: bool,
+        reason: str | None, started_ms: int = 0
     ) -> None:
         entry = {
             "tool": str(tool),
@@ -186,6 +191,8 @@ class ToolGateway:
             "candidate_hash": context.candidate_hash,
             "allowed": allowed,
             "reason": reason,
+            "started_ms": started_ms,
+            "ended_ms": int(self.ledger.elapsed * 1000),
         }
         self._log.append(entry)
         if self.on_tool_call is not None:

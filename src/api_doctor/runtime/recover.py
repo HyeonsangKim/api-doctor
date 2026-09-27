@@ -14,6 +14,7 @@ from typing import Any
 from ..model.gateway import (
     ChatBackend, ModelConfig, ModelGateway, ModelUnavailable, NvidiaChatBackend,
 )
+from ..profiling.nat import write_all as write_profile
 from ..report.build import ReportInputs, write as write_report
 from ..sandbox.base import SandboxLimits
 from .baseline import BaselineResult, run_baseline
@@ -121,6 +122,7 @@ def recover(
     paths = _finalize(
         session, status, orchestration, ledger, scripted, gateway,
         baseline_verdict=baseline.verdict,
+        tool_log=orchestration.tool_log if orchestration else [],
     )
     return RecoveryResult(
         baseline=baseline, status=status, orchestration=orchestration,
@@ -161,6 +163,7 @@ def _finalize(
     scripted: bool,
     gateway: ModelGateway | None = None,
     baseline_verdict: Any | None = None,
+    tool_log: list[dict[str, Any]] | None = None,
 ) -> tuple[Path, Path]:
     ledger.terminate()
     per_role = gateway.per_role_calls() if gateway else {}
@@ -172,6 +175,15 @@ def _finalize(
         scripted=scripted, baseline_verdict=baseline_verdict,
     )
     paths = write_report(report_inputs)
+
+    # FR-018: 역할별 호출·토큰·지연과 도구 구간을 산출한다.
+    if gateway is not None:
+        write_profile(
+            session.paths.run_dir,
+            model_calls=gateway.calls,
+            tool_log=tool_log or [],
+            ledger_usage=ledger.usage(),
+        )
 
     from .store import Manifest
 

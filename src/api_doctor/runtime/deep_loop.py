@@ -112,6 +112,7 @@ def orchestrate_deep(
         status=final, decision=gate,
         lead_turns=len(delegations),
         delegations=delegations, detail=gate.detail,
+        tool_log=gateway.call_log,
     )
 
 

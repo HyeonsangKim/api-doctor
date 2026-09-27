@@ -48,6 +48,9 @@ class ModelCall:
     tokens_kind: str
     error: str | None = None
     retry_of: int | None = None
+    # run 시작 기준 상대 시각(ms). Gantt 와 구간 대조에 쓴다 (FR-018).
+    started_ms: int = 0
+    ended_ms: int = 0
 
     @property
     def total_tokens(self) -> int | None:
@@ -65,6 +68,8 @@ class ModelCall:
             "tokens_kind": self.tokens_kind,
             "error": self.error,
             "retry_of": self.retry_of,
+            "started_ms": self.started_ms,
+            "ended_ms": self.ended_ms,
         }
 
 
@@ -134,6 +139,7 @@ class ModelGateway:
         max_output = self.ledger.limits.max_output_tokens.get(agent_id, 2048)
 
         started = time.monotonic()
+        started_ms = int(self.ledger.elapsed * 1000)
         text, usage, error = "", None, None
         try:
             text, usage = self.backend.complete(
@@ -164,6 +170,8 @@ class ModelGateway:
             tokens_kind="actual" if usage is not None else "estimated",
             error=error,
             retry_of=retry_of,
+            started_ms=started_ms,
+            ended_ms=int(self.ledger.elapsed * 1000),
         )
         self.calls.append(call)
         if self.on_call is not None:

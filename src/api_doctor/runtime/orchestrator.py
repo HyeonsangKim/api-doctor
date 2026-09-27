@@ -33,6 +33,7 @@ class OrchestrationResult:
     lead_turns: int
     delegations: list[SubAgentRun] = field(default_factory=list)
     detail: str = ""
+    tool_log: list[dict[str, Any]] = field(default_factory=list)
 
 
 def orchestrate(
@@ -115,7 +116,7 @@ def orchestrate(
                 return OrchestrationResult(
                     status=gate.status or RunStatus.VERIFICATION_INCONCLUSIVE,
                     decision=gate, lead_turns=turns, delegations=delegations,
-                    detail=gate.detail,
+                    detail=gate.detail, tool_log=gateway.call_log,
                 )
             observations.append(
                 f"종료 게이트가 되돌려보냈습니다 ({gate.rejection}): {gate.detail[:200]}"
@@ -178,17 +179,19 @@ def orchestrate(
                 return OrchestrationResult(
                     status=gate.status, decision=gate, lead_turns=turns,
                     delegations=delegations, detail=gate.detail,
+                    tool_log=gateway.call_log,
                 )
             return OrchestrationResult(
                 status=stop_status, decision=gate, lead_turns=turns,
                 delegations=delegations, detail=gate.detail,
+                tool_log=gateway.call_log,
             )
 
     gate = _run_gate(session, allow_finish=not finish_requested)
     status = gate.status or RunStatus.VERIFICATION_INCONCLUSIVE
     return OrchestrationResult(
         status=status, decision=gate, lead_turns=turns,
-        delegations=delegations, detail=gate.detail,
+        delegations=delegations, detail=gate.detail, tool_log=gateway.call_log,
     )
 
 
