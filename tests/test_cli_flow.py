@@ -62,14 +62,21 @@ def test_healthy_code_ends_without_model_calls(cli, home) -> None:
 
 @requires_docker
 def test_composite_defect_fails_completeness(cli, home) -> None:
+    """결함은 baseline 에서 확인된다.
+
+    모델 키가 없으므로 복구는 시도되지 않고 needs_user_action 으로 끝난다 —
+    그것이 정직한 결과다. baseline 판정은 그대로 남는다.
+    """
     result, payload = _run(
         cli, "run", "-d", "seoul_library", "-c", str(EXAMPLES / "connector_broken.py")
     )
     assert result.exit_code == 3
-    assert payload["status"] == "verification_failed"
+    assert payload["status"] == "needs_user_action"
+    assert "NVIDIA_API_KEY" in (payload["error"] or "")
     checks = {c["kind"]: c["outcome"] for c in payload["verification"]["checks"]}
     assert checks["execution"] == "pass", "실행 자체는 성공한다"
     assert checks["completeness"] == "fail", "데이터는 복구되지 않았다"
+    assert payload["contributions"] == [], "복구를 시도하지 않았으면 기여도 없다"
 
 
 @requires_docker
@@ -78,7 +85,7 @@ def test_partial_repair_still_fails(cli, home) -> None:
     _, payload = _run(
         cli, "run", "-d", "seoul_library", "-c", str(EXAMPLES / "connector_partial.py")
     )
-    assert payload["status"] == "verification_failed"
+    assert payload["status"] == "needs_user_action"
     checks = {c["kind"]: c["outcome"] for c in payload["verification"]["checks"]}
     assert checks["fields"] == "pass" and checks["values"] == "pass"
     assert checks["completeness"] == "fail"
@@ -105,7 +112,7 @@ def test_show_and_replay_need_no_external_calls(cli, home) -> None:
     payload = json.loads(result.stdout)
     assert payload["display_mode"] == "replay"
     assert payload["external_calls"] == 0
-    assert payload["original_status"] == "verification_failed"
+    assert payload["original_status"] == "needs_user_action"
 
 
 @requires_docker
