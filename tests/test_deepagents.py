@@ -178,3 +178,128 @@ def test_model_calls_all_pass_through_the_ledger(tmp_path) -> None:
     assert sum(per_role.values()) == usage["model_calls"]
     assert set(per_role) <= {"main", *DELEGATION_TARGETS}
     assert per_role["main"] > 0
+
+
+# ---------------------------------------------------------------- 위임 경계
+
+
+def _run_script(session, script):
+    gateway = ToolGateway(ledger=session.ledger)
+    register_all(gateway, session)
+    model = ModelGateway(
+        backend=ScriptedBackend(
+            responses=script,
+            usage_per_call={"input_tokens": 900, "output_tokens": 180,
+                            "total_tokens": 1080},
+        ),
+        ledger=session.ledger,
+    )
+    return orchestrate_deep(session=session, model=model), model
+
+
+@requires_docker
+def test_delegation_budget_is_actually_spent(tmp_path) -> None:
+    """기본 하네스에서도 위임 예산이 차감돼야 한다 (FR-003).
+
+    `task` 를 감쌀 수 없다는 이유로 이 검사가 빠져 있었다.
+    """
+    session = make_session(tmp_path)
+    _run_script(session, deep_happy_script())
+    usage = session.ledger.usage()
+    assert usage["delegations"] == 4
+    assert session.ledger.role_delegations["data_auditor"] == 1
+
+
+@requires_docker
+def test_repeated_delegation_is_rejected(tmp_path) -> None:
+    """PRD §5.3.3: 같은 역할·질문·후보의 재위임은 상한보다 먼저 거절된다."""
+    from _harness import j
+
+    same = j({"tool": "task", "args": {"subagent_type": "spec_researcher",
+                                       "description": "응답 구조를 알려줘"}})
+    session = make_session(tmp_path)
+    _run_script(session, [
+        same,
+        j({"tool": "search_spec", "args": {"question": "구조"}}),
+        j({"outcome": "completed", "summary": "확인함"}),
+        same,
+        j({"outcome": "completed", "summary": "중복이라 끝냅니다."}),
+    ])
+    rejected = [
+        e for e in session.events.read(session.paths.run_dir)
+        if e.type is EventType.DELEGATION_REJECTED
+        and e.data.get("reason") == "NO_NEW_EVIDENCE"
+    ]
+    assert rejected, "중복 위임이 거절되지 않았다"
+    assert session.ledger.role_delegations["spec_researcher"] == 1, \
+        "거절된 위임은 예산을 쓰지 않아야 한다"
+
+
+@requires_docker
+def test_unregistered_target_is_refused(tmp_path) -> None:
+    """AC-01: 등록되지 않은 대상으로 위임할 수 없다."""
+    from _harness import j
+
+    session = make_session(tmp_path)
+    _run_script(session, [
+        j({"tool": "task", "args": {"subagent_type": "general-purpose",
+                                    "description": "아무거나 해줘"}}),
+        j({"outcome": "completed", "summary": "거절당했습니다."}),
+    ])
+    assert session.ledger.usage()["delegations"] == 0
+
+
+@requires_docker
+def test_role_delegation_cap_is_enforced(tmp_path) -> None:
+    """역할당 위임 2회 상한."""
+    from _harness import j
+
+    session = make_session(tmp_path)
+    script = []
+    for n in range(4):
+        script += [
+            j({"tool": "task", "args": {"subagent_type": "runtime_diagnostician",
+                                        "description": f"관측 {n} 번째 다른 질문"}}),
+            j({"tool": "run_probe", "args": {"probe_id": "range_coverage"}}),
+            j({"outcome": "completed", "summary": f"관측 {n}"}),
+        ]
+    script.append(j({"outcome": "completed", "summary": "끝"}))
+    _run_script(session, script)
+    assert session.ledger.role_delegations["runtime_diagnostician"] <= 2
+
+
+@requires_docker
+def test_role_that_used_no_tools_stays_visible(tmp_path) -> None:
+    """FR-017: 이름만 등장한 역할을 보고서가 숨기면 안 된다.
+
+    게이트웨이 호출 기록에서 위임을 복원하던 방식은 도구를 안 쓴 역할을
+    통째로 빠뜨렸다.
+    """
+    from _harness import j
+
+    session = make_session(tmp_path)
+    result, _ = _run_script(session, [
+        j({"tool": "task", "args": {"subagent_type": "spec_researcher",
+                                    "description": "도구 없이 답만 한다"}}),
+        j({"outcome": "completed", "summary": "도구를 쓰지 않고 답합니다."}),
+        j({"outcome": "completed", "summary": "끝"}),
+    ])
+    used = {d.agent_id: d for d in result.delegations}
+    assert "spec_researcher" in used, "도구를 안 쓴 역할이 사라졌다"
+    assert used["spec_researcher"].tool_calls == []
+
+
+@requires_docker
+def test_rejected_delegation_is_recorded_as_evidence(tmp_path) -> None:
+    """무엇을 시도했다 막혔는지가 증거다."""
+    from _harness import j
+
+    session = make_session(tmp_path)
+    result, _ = _run_script(session, [
+        j({"tool": "task", "args": {"subagent_type": "general-purpose",
+                                    "description": "범위 밖 위임"}}),
+        j({"outcome": "completed", "summary": "끝"}),
+    ])
+    blocked = [d for d in result.delegations if str(d.result.outcome) == "blocked"]
+    assert blocked, "거절된 위임이 기록에 남아야 한다"
+    assert "FORBIDDEN" in blocked[0].result.summary

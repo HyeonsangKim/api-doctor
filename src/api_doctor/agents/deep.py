@@ -38,6 +38,7 @@ from ..model.gateway import ModelGateway
 from ..runtime.envelope import build_context, build_envelope
 from ..runtime.session import RunSession
 from ..tools.gateway import TOOL_ACL, Tool, ToolContext, ToolError, ToolGateway
+from .delegation_guard import DelegationGuard
 from .prompts import BY_AGENT
 
 DELEGATION_TARGETS = (
@@ -59,8 +60,7 @@ class DeepTeam:
     inventory: dict[str, list[str]]
     contexts: dict[str, ToolContext] = field(default_factory=dict)
     objectives: dict[str, str] = field(default_factory=dict)
-    # 서브에이전트가 마지막으로 낸 본문. 감사 findings 복원에 쓴다.
-    last_messages: dict[str, list[str]] = field(default_factory=dict)
+    guard: Any = None
 
 
 def _describe(tool: Tool) -> str:
@@ -194,16 +194,26 @@ def build_team(
     main_factory = factory_for("main")
     contexts["main"] = main_factory()
 
+    inventory_preview = {
+        sub["name"]: sorted(t.name for t in sub["tools"]) for sub in subagents
+    }
+    guard = DelegationGuard(
+        ledger=session.ledger, events=session.events,
+        targets=DELEGATION_TARGETS,
+        current_hash=lambda: session.current_hash,
+        inventory=inventory_preview,
+    )
+
     agent = create_deep_agent(
         model=lead_model,
         tools=_as_langchain_tools(gateway, main_factory),
         subagents=subagents,
         system_prompt=BY_AGENT["main"],
-        middleware=[FilesystemMiddleware(tools=["read_file"])],
+        middleware=[FilesystemMiddleware(tools=["read_file"]), guard],
     )
 
     inventory = assert_deep_inventory(agent, subagents)
-    return DeepTeam(agent=agent, inventory=inventory, contexts=contexts)
+    return DeepTeam(agent=agent, inventory=inventory, contexts=contexts, guard=guard)
 
 
 _ROLE_SUMMARY = {

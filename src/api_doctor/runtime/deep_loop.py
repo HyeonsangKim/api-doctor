@@ -72,14 +72,12 @@ def orchestrate_deep(
     delegations: list[_Delegation] = []
 
     status: RunStatus | None = None
-    transcript: list[Any] = []
     try:
-        result = team.agent.invoke(
+        team.agent.invoke(
             {"messages": [{"role": "user", "content": _opening(session)}]},
             {"recursion_limit": MAX_LEAD_STEPS,
              "configurable": {"thread_id": session.run_id}},
         )
-        transcript = list(result.get("messages") or [])
     except Cancelled:
         session.forced_halt = str(RunStatus.CANCELLED)
         status = RunStatus.CANCELLED
@@ -93,11 +91,10 @@ def orchestrate_deep(
             error="agent_protocol_error",
         )
 
-    team.objectives.update(_objectives(transcript))
-    returns = _subagent_returns(transcript)
-    delegations = _reconstruct_delegations(session, gateway, team, returns)
-    for text in returns.get("data_auditor", []):
-        _record(session, "data_auditor", text)
+    delegations = _delegations_from_guard(team, gateway)
+    for run in delegations:
+        if run.agent_id == "data_auditor" and run.result.findings:
+            _record_findings(session, run.result)
     for run in delegations:
         session.events.append(
             EventType.DELEGATION_FINISHED,
@@ -157,73 +154,63 @@ def _to_result(text: str) -> AgentResult:
         )
 
 
-def _subagent_returns(transcript: list[Any]) -> dict[str, list[str]]:
-    """`task` 호출과 그 결과를 짝지어 역할별 반환 본문을 모은다.
-
-    main 의 대화에는 위임 요청(AIMessage.tool_calls)과 그 결과(ToolMessage)가
-    순서대로 남으므로, 호출 id 로 이어 붙이면 누가 무엇을 냈는지 알 수 있다.
-    """
-    pending: dict[str, str] = {}
-    returns: dict[str, list[str]] = {}
-    for message in transcript:
-        for call in getattr(message, "tool_calls", None) or []:
-            if call.get("name") == "task":
-                agent_id = str((call.get("args") or {}).get("subagent_type", ""))
-                if agent_id:
-                    pending[str(call.get("id"))] = agent_id
-        call_id = getattr(message, "tool_call_id", None)
-        if call_id and call_id in pending:
-            agent_id = pending.pop(call_id)
-            returns.setdefault(agent_id, []).append(
-                _extract_text(getattr(message, "content", ""))
-            )
-    return returns
-
-
-def _objectives(transcript: list[Any]) -> dict[str, str]:
-    objectives: dict[str, str] = {}
-    for message in transcript:
-        for call in getattr(message, "tool_calls", None) or []:
-            if call.get("name") == "task":
-                args = call.get("args") or {}
-                agent_id = str(args.get("subagent_type", ""))
-                if agent_id and agent_id not in objectives:
-                    objectives[agent_id] = str(args.get("description", ""))
-    return objectives
-
-
-def _reconstruct_delegations(
-    session: RunSession,
-    gateway: ToolGateway,
-    team: DeepTeam,
-    returns: dict[str, list[str]],
+def _delegations_from_guard(
+    team: DeepTeam, gateway: ToolGateway
 ) -> list[_Delegation]:
-    """게이트웨이 호출 기록에서 위임을 복원한다.
+    """미들웨어가 가로챈 위임을 그대로 쓴다.
 
-    deepagents 의 `task` 는 LangGraph 런타임 주입을 요구해 밖에서 감쌀 수 없다.
-    대신 네이티브로 돌리고, 전문가의 **모든 도구 호출이 우리 게이트웨이를
-    지난다**는 사실을 이용해 누가 무엇을 했는지 복원한다.
+    게이트웨이 호출 기록에서 복원하던 앞선 방식은 **도구를 한 번도 쓰지 않은
+    역할을 통째로 빠뜨렸다.** FR-017 이 드러내려는 "이름만 등장하는 역할" 을
+    오히려 숨기는 셈이라 바꿨다.
 
-    경계는 이 복원에 의존하지 않는다 — 위임 대상은 deepagents 등록으로,
-    권한은 ToolGateway 로, 호출 수는 원장으로, 판정은 고정 게이트로 강제된다.
+    거절된 위임도 기록에 남긴다 — 무엇을 시도했다 막혔는지가 증거다.
     """
-    runs: list[_Delegation] = []
-    current: _Delegation | None = None
+    guard = team.guard
+    if guard is None:
+        return []
+
+    # 도구 호출을 역할별 순서대로 각 위임에 나눠 붙인다.
+    # main 은 순차 실행이므로 게이트웨이 로그의 순서가 곧 위임 순서다.
+    accepted = [r for r in guard.records if r.accepted]
+    buckets: dict[str, list[list[str]]] = {}
+    for record in accepted:
+        buckets.setdefault(record.agent_id, []).append([])
+
+    cursor: dict[str, int] = {}
+    previous: str | None = None
     for entry in gateway.call_log:
         agent_id = entry["agent_id"]
-        if agent_id == "main":
+        if agent_id == "main" or agent_id not in buckets:
             continue
-        if current is None or current.agent_id != agent_id:
-            texts = returns.get(agent_id) or []
-            raw = texts[len(runs) if len(runs) < len(texts) else -1] if texts else ""
-            current = _Delegation(
-                agent_id=agent_id,
-                objective=team.objectives.get(agent_id, ""),
-                result=_to_result(raw),
-            )
-            runs.append(current)
+        if agent_id != previous:
+            cursor[agent_id] = cursor.get(agent_id, -1) + 1
+            previous = agent_id
+        index = min(cursor[agent_id], len(buckets[agent_id]) - 1)
         if entry["allowed"]:
-            current.tool_calls.append(entry["tool"])
+            buckets[agent_id][index].append(entry["tool"])
+
+    taken: dict[str, int] = {}
+    runs: list[_Delegation] = []
+    for record in guard.records:
+        if not record.accepted:
+            runs.append(_Delegation(
+                agent_id=record.agent_id, objective=record.objective,
+                result=AgentResult(
+                    outcome=Outcome.BLOCKED,
+                    summary=f"위임이 거절되었습니다: {record.reason}",
+                ),
+                tool_calls=[], turns=0,
+            ))
+            continue
+        index = taken.get(record.agent_id, 0)
+        taken[record.agent_id] = index + 1
+        tools = buckets.get(record.agent_id, [[]])[
+            min(index, len(buckets[record.agent_id]) - 1)
+        ]
+        runs.append(_Delegation(
+            agent_id=record.agent_id, objective=record.objective,
+            result=_to_result(record.returned), tool_calls=list(tools),
+        ))
     return runs
 
 
@@ -237,39 +224,27 @@ def _extract_text(result: Any) -> str:
     return str(content)
 
 
-def _record(session: RunSession, agent_id: str, summary: str) -> None:
-    """감사 반환이면 세션 상태에 반영한다.
+def _record_findings(session: RunSession, result: AgentResult) -> None:
+    """감사자의 구조화 findings 를 세션에 반영한다.
 
-    구조화 findings 가 없으면 감사 기록을 만들지 않는다 — 찬성 문구만으로는
-    감사가 완료되지 않기 때문이다 (AC-04).
+    구조화되지 않은 찬성 문구는 기록하지 않는다 — 그것만으로는 감사가
+    완료되지 않기 때문이다 (AC-04).
     """
-    if agent_id != "data_auditor":
-        return
-    try:
-        data = parse_json_object(summary)
-    except ProtocolError:
-        return
-    for raw in data.get("findings") or []:
-        if not isinstance(raw, dict):
-            continue
-        conclusion = str(raw.get("conclusion", "")).strip()
-        if conclusion not in ("no_issue", "issue", "inconclusive"):
-            continue
+    for finding in result.findings:
         session.audit_records.append(
             AuditRecord(
                 candidate_hash=session.current_hash,
-                risk_id=str(raw.get("risk_id", "")).strip(),
-                hypothesis=str(raw.get("hypothesis", ""))[:600],
-                invariant=str(raw.get("invariant", ""))[:120],
-                evidence_ids=tuple(str(x) for x in (raw.get("evidence_ids") or [])),
-                probe_result_ids=tuple(
-                    str(x) for x in (raw.get("probe_result_ids") or [])
-                ),
-                conclusion=conclusion,
+                risk_id=finding.risk_id,
+                hypothesis=finding.hypothesis,
+                invariant=finding.invariant,
+                evidence_ids=finding.evidence_ids,
+                probe_result_ids=finding.probe_result_ids,
+                conclusion=finding.conclusion,
             )
         )
     session.events.append(
         EventType.AUDIT_RETURNED,
-        f"감사가 {len(session.audit_for(session.current_hash))}개 항목을 반환했습니다.",
+        f"감사가 {len(result.findings)}개 항목을 반환했습니다.",
         candidate_hash=session.current_hash,
+        findings=[f.to_json() for f in result.findings],
     )
