@@ -14,7 +14,7 @@ from api_doctor.runtime.store import RunStore
 from api_doctor.report.sanitize import sanitize
 
 from _docker import requires_docker
-from _harness import happy_path_script
+from _harness import deep_happy_script
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
@@ -37,7 +37,7 @@ def _recover(tmp_path, name: str, script: list[str] | None = None):
 
 @requires_docker
 def test_full_pipeline_produces_report(tmp_path) -> None:
-    result = _recover(tmp_path, "broken", happy_path_script())
+    result = _recover(tmp_path, "broken", deep_happy_script())
     assert result.status is RunStatus.VERIFIED_REPAIRED
 
     markdown = result.report_paths[0].read_text(encoding="utf-8")
@@ -52,7 +52,7 @@ def test_full_pipeline_produces_report(tmp_path) -> None:
 @requires_docker
 def test_report_shows_every_role_contribution(tmp_path) -> None:
     """FR-017: 이름만 등장하는 역할을 구분해 드러낸다."""
-    result = _recover(tmp_path, "broken", happy_path_script())
+    result = _recover(tmp_path, "broken", deep_happy_script())
     payload = json.loads(result.report_paths[1].read_text(encoding="utf-8"))
 
     contributions = {c["agent_id"]: c for c in payload["contributions"]}
@@ -65,7 +65,7 @@ def test_report_shows_every_role_contribution(tmp_path) -> None:
 @requires_docker
 def test_per_role_usage_reconciles_in_report(tmp_path) -> None:
     """AC-16: 역할별 합계와 원장이 일치함을 보고서가 밝힌다."""
-    result = _recover(tmp_path, "broken", happy_path_script())
+    result = _recover(tmp_path, "broken", deep_happy_script())
     markdown = result.report_paths[0].read_text(encoding="utf-8")
     payload = json.loads(result.report_paths[1].read_text(encoding="utf-8"))
 
@@ -149,7 +149,7 @@ def test_sanitize_neutralizes_hostile_strings(raw: str, expected: str) -> None:
 @requires_docker
 def test_single_ledger_across_baseline_and_recovery(tmp_path) -> None:
     """FR-003: 원장이 하나여야 모든 호출이 같은 gateway 를 통과한다."""
-    result = _recover(tmp_path, "broken", happy_path_script())
+    result = _recover(tmp_path, "broken", deep_happy_script())
     payload = json.loads(result.report_paths[1].read_text(encoding="utf-8"))
     usage = payload["usage"]
     # baseline 1회 + probe·종료검증이 같은 원장에 누적됐어야 한다

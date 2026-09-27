@@ -6,11 +6,17 @@
 
 from __future__ import annotations
 
-import json
-import re
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
+
+from ..jsonio import ProtocolError, parse_json_object
+
+__all__ = [
+    "AgentResult", "AgentTurn", "Finding", "LeadAction", "LeadDecision",
+    "Outcome", "ProtocolError", "ToolRequest", "parse_agent_result",
+    "parse_agent_turn", "parse_json_object", "parse_lead_decision",
+]
 
 
 class Outcome(StrEnum):
@@ -29,38 +35,6 @@ class LeadAction(StrEnum):
     REVISE_PLAN = "revise_plan"
     REQUEST_FINISH = "request_finish"
     REQUEST_STOP = "request_stop"
-
-
-class ProtocolError(RuntimeError):
-    """구조화 반환이 계약을 만족하지 않습니다."""
-
-
-_FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.S)
-
-
-def parse_json_object(text: str) -> dict[str, Any]:
-    """모델 출력에서 JSON 객체 하나를 꺼낸다.
-
-    코드펜스·앞뒤 설명을 관대하게 다루되, **객체가 아니면 거절**한다.
-    관대함은 형식에만 적용하고 내용에는 적용하지 않는다.
-    """
-    candidates: list[str] = []
-    fenced = _FENCE.search(text)
-    if fenced:
-        candidates.append(fenced.group(1))
-    candidates.append(text)
-    start, end = text.find("{"), text.rfind("}")
-    if start != -1 and end > start:
-        candidates.append(text[start:end + 1])
-
-    for candidate in candidates:
-        try:
-            parsed = json.loads(candidate.strip())
-        except (json.JSONDecodeError, ValueError):
-            continue
-        if isinstance(parsed, dict):
-            return parsed
-    raise ProtocolError("모델 출력에서 JSON 객체를 찾지 못했습니다.")
 
 
 @dataclass(frozen=True, slots=True)

@@ -95,3 +95,41 @@ def happy_path_script() -> list[str]:
 
         j({"action": "request_finish", "reason": "수리와 독립 감사 완료"}),
     ]
+
+
+def deep_happy_script() -> list[str]:
+    """deepagents 하네스용 대본.
+
+    main 은 `task` 도구로 위임한다 — 이것이 Deep Agents 의 위임 수단이다.
+    """
+    return [
+        j({"tool": "task", "args": {"subagent_type": "spec_researcher",
+                                    "description": "레코드 배열 경로와 범위 종료 규칙"}}),
+        j({"tool": "search_spec", "args": {"question": "레코드 배열 중첩 경로"}}),
+        j({"outcome": "completed", "summary": "배열은 SeoulPublicLibraryInfo.row 다."}),
+
+        j({"tool": "task", "args": {"subagent_type": "runtime_diagnostician",
+                                    "description": "계약 범위 전체를 요청하는지 관측"}}),
+        j({"tool": "run_probe", "args": {"probe_id": "range_coverage"}}),
+        j({"outcome": "completed", "summary": "위치 1~2 만 요청한다."}),
+
+        j({"tool": "task", "args": {"subagent_type": "repair_engineer",
+                                    "description": "중첩 경로와 범위 종료를 고친다"}}),
+        j({"tool": "submit_patch", "args": {"source": connector("healthy"),
+                                            "rationale": "중첩 경로와 종료 조건"}}),
+        j({"outcome": "completed", "summary": "두 결함을 고쳤다."}),
+
+        j({"tool": "task", "args": {"subagent_type": "data_auditor",
+                                    "description": "데이터 손실 조사"}}),
+        j({"tool": "run_probe", "args": {"probe_id": "page_partition"}}),
+        j({"tool": "run_probe", "args": {"probe_id": "field_presence"}}),
+        j({"outcome": "completed", "summary": "손실 근거가 없다.", "findings": [
+            {"risk_id": "pagination_boundary", "hypothesis": "마지막 구간 누락",
+             "invariant": "partition_invariance", "conclusion": "no_issue",
+             "probe_result_ids": ["pr1"]},
+            {"risk_id": "mapping_preservation", "hypothesis": "중첩 경로 오독",
+             "invariant": "required_fields_present", "conclusion": "no_issue",
+             "probe_result_ids": ["pr2"]}]}),
+
+        j({"outcome": "completed", "summary": "수리와 독립 감사가 끝났습니다."}),
+    ]

@@ -43,6 +43,21 @@ M2·M3 의 구조는 scripted 모델로 검증했다. 실제 모델 trace 는 `N
 
 ## 에이전트 구조
 
+하네스는 **deepagents**가 기본이다 (PRD §5.3.4 우선 구현안). main은 Deep Agents의
+`task`로 위임하고, 네 전문가는 `subagents`로 등록된 제한된 agent loop다.
+
+```bash
+uv run api-doctor run -d seoul_library -c broken.py                     # deepagents (기본)
+uv run api-doctor run -d seoul_library -c broken.py --harness builtin   # 런타임 자체 루프
+```
+
+기본으로 딸려오는 `execute`(셸)·`write_file`·`delete` 등은 `FilesystemMiddleware(tools=[...])`
+로 **도구 노드에서 제거**한다. 남는 `read_file`은 `StateBackend`(에이전트 상태 안의 가상
+파일시스템) 상대라 호스트 디스크에 닿지 않는다. general-purpose 하위 에이전트도 끈다.
+경계는 매번 컴파일된 그래프를 실측해 확인한다.
+
+
+
 ```
 main · recovery_lead          담당자·질문·재계획·종료 요청. 코드를 쓰거나 실행하지 못한다
  ├ spec_researcher            공식 명세의 응답 구조·조회 규칙·오류 구별

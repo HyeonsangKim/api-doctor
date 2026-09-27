@@ -115,52 +115,83 @@ PRD §1.5 가 든 "인증 오류도 XML 로 온다 → 파싱 오류로 오인" 
 
 ## 5. 기술 결정 기록 — main 의 하네스
 
-**결정**: deepagents 를 main 의 하네스로 **채택하지 않는다.** PRD §5.3.4 가 명시한
-대체안(동일 1+4 구조·도구 계약·LangGraph 상태를 유지하는 supervisor)을 쓴다.
+**결정**: PRD §5.3.4 의 우선 구현안대로 **deepagents 를 채택한다.**
+main 은 Deep Agents 의 계획·위임 하네스를 쓰고, 네 전문가는 `subagents` 로
+등록된 제한된 agent loop 다.
 
-**근거 (deepagents 0.7.19, 2026-09-27 실측)**
+> ### 정정 기록 (2026-09-27)
+>
+> 이 문서의 앞선 판에는 "deepagents 를 채택하지 않는다"는 기록이 있었다.
+> **그 판정은 틀렸고 철회한다.** 근거 두 가지가 모두 사실이 아니었다.
+>
+> | 당시 주장 | 실제 |
+> |---|---|
+> | "`execute`·`write_file` 이 남아 모델이 호스트에 직접 쓸 수 있다" | **기본 backend 가 `StateBackend`** — 에이전트 상태 안의 가상 파일시스템이며 호스트 디스크에 닿지 않는다. `supports_execution(StateBackend)` 는 거짓이라 `execute` 는 애초에 동작하지 않는다 |
+> | "제거할 방법이 없다" | `FilesystemMiddleware(tools=[...])` 로 **도구 노드에서 완전히 제거**된다. 스키마에서 숨기는 게 아니라 dispatch 대상에서 빠진다 |
+>
+> 실패 원인은 `HarnessProfile.excluded_tools` 하나만 시험하고 결론을 낸 것이다.
+> 문서에 적힌 `permissions`·`backend`·middleware 경로를 확인하지 않았다.
+> 한 가지 방법이 막혔다고 그 기능이 불가능하다고 적어서는 안 된다.
 
-기본으로 9개 도구를 싣는다. `tools=[]` · `subagents=[]` 로도 제거되지 않는다.
+### 경계를 만드는 세 가지 설정 (실측 확인)
+
+**1. `FilesystemMiddleware(tools=["read_file"])`**
+
+기본 9종 중 `execute` · `write_file` · `edit_file` · `delete` · `ls` · `glob` ·
+`grep` 가 도구 노드에서 사라진다. `read_file` 은 라이브러리가 필수로 요구해
+남기지만 `StateBackend` 상대라 호스트와 무관하다.
+
+**2. `GeneralPurposeSubagentProfile(enabled=False)`**
+
+`task` 도구가 나열하는 위임 대상이 정확히 우리 넷이 된다.
 
 ```
-기본값        ['delete','edit_file','execute','glob','grep','ls','read_file','task','write_file']
-tools=[]      (동일)
-subagents=[]  (동일)
+task 가 실제로 나열하는 위임 대상: ['spec_researcher', 'runtime_diagnostician',
+                                   'repair_engineer', 'data_auditor']
+general-purpose 등록됨: False
 ```
 
-`HarnessProfile(excluded_tools=[...])` 로 일부는 제거된다. 그러나 프로파일 키가
-**모델 spec/provider 에 묶여** 있고, 제거 결과는 다음과 같다.
+**3. 도구는 전부 `ToolGateway` 가 바인딩한 클로저**
+
+권한은 프롬프트가 아니라 실행 컨텍스트에서 나온다. 모델이 `agent_id` 를
+위조해도 무시된다.
+
+### 최종 실측 인벤토리
 
 ```
-제한 후       ['delete','edit_file','execute','get_budget','glob','grep','ls','read_file','write_file']
-제거된 것     task  (동적 위임 — 이것만 빠진다)
-남은 것       execute(셸) · write_file · delete · 파일시스템 전체
+main                    ['get_budget','read_evidence','read_file','request_finish','request_stop','task']
+spec_researcher         ['get_budget','read_evidence','search_spec']
+runtime_diagnostician   ['get_budget','inspect_code','inspect_trace','read_evidence','run_probe']
+repair_engineer         ['get_budget','inspect_code','read_evidence','run_probe','submit_patch']
+data_auditor            ['get_budget','inspect_code','inspect_trace','read_evidence','run_probe']
+
+위험 도구 누수: 없음
+하위 재위임 가능 역할: 없음
 ```
 
-`execute` 와 파일시스템 도구는 `FilesystemMiddleware` 소속이고, 이 미들웨어는
-라이브러리의 **보호된 scaffolding** 이라 `excluded_middleware` 로 제외하면
-`ValueError` 가 난다.
+### 구현하며 걸린 것들
 
-**이것이 왜 차단 사유인가**
+| 문제 | 원인 | 해결 |
+|---|---|---|
+| 서브에이전트가 도구를 한 번도 못 부름 | 우리 JSON 프로토콜과 LangChain 의 `tool_calls` 가 이어지지 않음 | `GatewayChatModel._generate` 가 `{"tool":...}` 출력을 `AIMessage.tool_calls` 로 변환 |
+| 도구 호출이 전부 `INVALID_ARGS` | 래퍼가 `**kwargs` 시그니처라 LangChain 이 인자 스키마를 만들지 못함 | 도구별 `args_schema` 를 명시 |
+| **수리 후 감사가 낡은 후보에서 돌아 `MISSING_AUDIT`** | deepagents 는 서브에이전트를 한 번만 구성하는데 도구 컨텍스트가 그 시점 hash 에 고정됨 | 컨텍스트를 **호출 시점마다** 새로 만들어 현재 `candidate_hash` 를 따라가게 함 |
+| `task` 를 감싸 중복 위임을 막으려다 실패 | `task` 는 LangGraph 런타임 주입을 요구해 밖에서 호출할 수 없음 | 네이티브로 돌리고 게이트웨이 호출 기록에서 위임을 복원 |
 
-- AC-01 은 "등록된 위임 대상은 4개뿐이고 기본 general-purpose·동적 생성·하위
-  재위임을 사용할 수 없다"를 요구한다. `task` 는 제거되므로 이 부분은 만족한다.
-- 그러나 AC-07 은 "명세 조사자가 파일 변경을 요청하면 프롬프트와 무관한 실행
-  컨텍스트 권한으로 차단한다"를 요구한다. `execute` 와 `write_file` 이 남아 있으면
-  **모델이 도구 게이트웨이를 우회해 호스트에 직접 쓸 수 있다.** 이는 Zone T 와
-  Zone A 의 경계 자체를 무너뜨린다.
-- PRD §5.3.4 가 요구하는 "초기화 후 실제 tool inventory 검사"를 통과할 수 없다.
+### 두 하네스를 모두 유지한다
 
-**대신 채택한 것**
+`--harness deepagents` (기본) 와 `--harness builtin` 을 둘 다 제공한다.
 
-main 과 네 전문가 모두 `model/gateway.py` 위의 제한된 agent loop 로 구현한다.
-이 경로의 이점은 부수적이 아니라 요구사항 직결이다 — FR-003 은 "모든 SDK 요청·
-자동 재시도·구조화 출력 재시도·요약·보조 모델은 동일 gateway 를 통과한다"를
-요구하는데, 외부 에이전트 프레임워크를 쓰면 그 내부 호출을 원장에 싣는 것을
-보장하기 어렵다. 직접 구현하면 **모델 호출 경로가 하나뿐**임이 자명하다.
+| | deepagents (기본) | builtin |
+|---|---|---|
+| 위임 수단 | Deep Agents 의 `task` | 런타임의 명시적 루프 |
+| 위임 대상 제한 | 프레임워크 등록 (4개) | 프로토콜 파서 |
+| `NO_NEW_EVIDENCE` 중복 검사 | 없음 (`task` 를 감쌀 수 없음) | **있음** |
+| 위임별 lease | 없음 | **있음** |
+| 도구 권한·예산·종료 게이트 | 동일 | 동일 |
 
-LangGraph 는 stage 상태기계와 중단 처리에 계속 쓴다. 1+4 구조·도구 계약·역할별
-가시성은 그대로다. **단일 에이전트로 축소하지 않는다.**
+경계와 판정은 두 경로가 같다. builtin 은 PRD §5.3.3 의 중복 위임 거절을
+추가로 강제하므로 평가 비교(§7.3)에 함께 쓴다.
 
-> 이 판정은 deepagents 0.7.19 기준이다. 상위 버전에서 `FilesystemMiddleware` 를
-> 끌 수 있게 되면 재검토한다.
+**모델 호출은 두 경우 모두 `GatewayChatModel` 을 지난다.** 프레임워크 내부의
+재시도·요약까지 같은 원장에 남는다 (FR-003).

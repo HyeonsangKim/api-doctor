@@ -115,9 +115,11 @@ def run(
     code: Annotated[Path, typer.Option("--code", "-c", help="연결 파일 경로")],
     snapshot: Annotated[str | None, typer.Option("--snapshot", help="동결 스냅샷 ID")] = None,
     source: Annotated[str, typer.Option("--source", help="fixture | live")] = "fixture",
+    harness: Annotated[str, typer.Option(
+        "--harness", help="deepagents | builtin")] = "deepagents",
     as_json: Annotated[bool, typer.Option("--json", help="JSON 으로 출력")] = False,
 ) -> None:
-    """깨진 연결을 복구한다. 현재는 baseline 까지 수행한다 (M1)."""
+    """깨진 연결을 복구한다."""
     def on_event(event: Event) -> None:
         if not as_json:
             err.print(format_event(event))
@@ -125,7 +127,7 @@ def run(
     try:
         result = recover(
             dataset_id=dataset, code_path=code, snapshot_id=snapshot,
-            source=source, on_event=on_event,
+            source=source, harness=harness, on_event=on_event,
         )
     except InputError as exc:
         _fail(exc.code, str(exc), 2, as_json)

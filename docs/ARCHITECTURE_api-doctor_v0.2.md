@@ -514,28 +514,21 @@ def evaluate(run: RunState) -> FinalStatus:
 
 ### 10.1 런타임 선택
 
-PRD §5.3.4의 우선안(deepagents)을 **실측 후 기각**했다. deepagents 0.7.19는 `execute`(셸)와 파일시스템 도구를 보호된 미들웨어로 싣고 있어 제거되지 않는다 — `excluded_tools`는 `task`만 걷어낸다. 모델이 도구 게이트웨이를 우회해 호스트에 쓸 수 있으므로 Zone T/A 경계가 성립하지 않는다. 실측 결과는 [Phase 0 기록 §5](PHASE0_keys_and_limits.md)에 있다.
+PRD §5.3.4의 우선안대로 **deepagents를 채택한다.** main은 Deep Agents의 계획·위임 하네스를 쓰고, 네 전문가는 `subagents`로 등록된 제한된 agent loop다.
 
-**채택안**: main과 네 전문가 모두 `model/gateway.py` 위의 제한된 agent loop다. PRD §5.3.4가 명시한 대체 경로이며, 1+4 구조·도구 계약·LangGraph 상태를 그대로 유지한다. 부수 효과가 아니라 요구사항 직결의 이점이 있다 — FR-003이 "모든 SDK 요청·재시도·구조화 출력 재시도가 동일 gateway를 통과"할 것을 요구하는데, 직접 구현하면 **모델 호출 경로가 하나뿐**임이 자명해진다.
+> 이 문서의 앞선 판에는 "deepagents를 실측 후 기각했다"는 기록이 있었다. **그 판정은 틀렸고 철회한다** — 기본 backend가 `StateBackend`(에이전트 상태 안의 가상 파일시스템)라 `write_file`이 호스트에 닿지 않고, `FilesystemMiddleware(tools=[...])`로 위험 도구를 완전히 제거할 수 있다. 정정 경위는 [Phase 0 기록 §5](PHASE0_keys_and_limits.md)에 남겼다.
 
-```python
-# agents/inventory.py
-ALLOWED = {
-    "main": {"delegate","revise_plan","get_budget","request_finish","request_stop","read_evidence"},
-    "spec_researcher":        {"search_spec","read_evidence","get_budget"},
-    "runtime_diagnostician":  {"inspect_code","inspect_trace","run_probe","read_evidence","get_budget"},
-    "repair_engineer":        {"inspect_code","submit_patch","run_probe","read_evidence","get_budget"},
-    "data_auditor":           {"inspect_code","inspect_trace","run_probe","read_evidence","get_budget"},
-}
+**경계를 만드는 세 가지 설정** (실측 확인):
 
-def assert_inventory(compiled) -> None:
-    """초기화 직후 컴파일된 그래프의 실제 bound tool 을 순회한다.
-    허용목록 밖 도구 · 동적 생성 도구 · 하위 재위임 발견 시 RuntimeError."""
-```
+1. `FilesystemMiddleware(tools=["read_file"])` — `execute`(셸)·`write_file`·`delete` 등 7종이 도구 노드에서 사라진다. 남는 `read_file`은 `StateBackend` 상대라 호스트와 무관하다.
+2. `GeneralPurposeSubagentProfile(enabled=False)` — `task`의 위임 대상이 정확히 우리 넷이 된다.
+3. 도구는 전부 `ToolGateway`가 바인딩한 클로저 — 권한이 실행 컨텍스트에서 나온다.
 
-> **행동(action)과 도구(tool)의 구분**: PRD §5.1.3의 9종이 "도구"이고, `delegate`·`revise_plan`은 main의 **하네스 행동**이다(deepagents의 `task`에 해당하되 4개 대상으로 고정). 위 `ALLOWED["main"]`은 둘을 합친 "main이 호출할 수 있는 전부"의 목록이며, 구현에서는 행동과 도구를 서로 다른 레이어로 등록한다. 전문가에게는 행동을 하나도 주지 않는다 — 그래서 하위 재위임이 구조적으로 불가능하다.
->
-> **스킬은 도구가 아니다**: PRD §5.3.2의 "해당 API 스킬"은 `search_spec`이 반환하는 사전검토 자료이지 별도 도구가 아니다 (§5.3.6). 그래서 `ALLOWED["spec_researcher"]`에 스킬 도구가 없다.
+**중요한 함정**: deepagents는 서브에이전트를 **한 번만** 구성한다. 도구 컨텍스트를 그 시점의 `candidate_hash`로 고정하면 수리 후 감사가 낡은 후보에서 돌아 `MISSING_AUDIT`이 된다. 컨텍스트는 **호출 시점마다** 새로 만들어야 한다.
+
+**모델 경로**: `GatewayChatModel`이 `ModelGateway`를 `BaseChatModel`로 감싼다. 프레임워크가 모델을 부르면 반드시 우리 원장을 지나므로, 내부 재시도·요약까지 계측된다 (FR-003). 우리 JSON 프로토콜은 `AIMessage.tool_calls`로 변환해 LangChain 루프와 잇는다.
+
+**두 하네스를 유지한다**: `--harness deepagents`(기본)와 `--harness builtin`. 경계·판정은 같고, builtin은 PRD §5.3.3의 `NO_NEW_EVIDENCE` 중복 위임 거절을 추가로 강제한다 — deepagents의 `task`는 LangGraph 런타임 주입을 요구해 밖에서 감쌀 수 없기 때문이다.
 
 - 검사 지점은 **두 곳**: 초기화 직후(inventory), 호출 시점(Tool Gateway ACL). 프롬프트는 셋 중 어느 것도 아니다.
 - deepagents로 경계를 못 만들면 `create_agent` 기반 supervisor로 교체한다. 교체해도 **1+4 구조·도구 계약·LangGraph 상태는 유지**한다. `build_lead()` 팩토리 한 곳만 바꾸면 되도록 설계한다.

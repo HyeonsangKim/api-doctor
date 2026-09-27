@@ -17,6 +17,7 @@ agents = [
     "langgraph>=0.2.60",
     "langchain-core>=0.3.29",
     "langchain-openai>=0.2.14",
+    "deepagents>=0.7.19",
 ]
 
 [project.scripts]

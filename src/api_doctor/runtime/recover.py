@@ -19,6 +19,7 @@ from ..sandbox.base import SandboxLimits
 from .baseline import BaselineResult, run_baseline
 from .budget import BudgetLedger, Cancelled
 from .events import EventType, RunStatus, Stage
+from .deep_loop import orchestrate_deep
 from .orchestrator import OrchestrationResult, orchestrate
 from .store import RunStore, utc_iso
 
@@ -46,6 +47,7 @@ def recover(
     model_backend: "ChatBackend | None" = None,
     model_config: ModelConfig | None = None,
     scripted: bool = False,
+    harness: str = "deepagents",
     on_event: Any = None,
 ) -> RecoveryResult:
     """전체 복구를 수행한다."""
@@ -101,9 +103,14 @@ def recover(
         **call.to_json(),
     )
 
+    runner = orchestrate_deep if harness == "deepagents" else orchestrate
+    session.events.append(
+        EventType.STAGE_CHANGED, f"하네스: {harness}",
+        harness=harness,
+    )
     with _cancellation(ledger):
         try:
-            orchestration = orchestrate(session=session, model=gateway)
+            orchestration = runner(session=session, model=gateway)
             status = orchestration.status
         except Cancelled:
             session.forced_halt = str(RunStatus.CANCELLED)
