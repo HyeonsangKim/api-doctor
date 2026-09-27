@@ -35,7 +35,8 @@ def test_complete_result_passes(setup) -> None:
 def test_missing_records_fail_completeness_only(setup) -> None:
     """제품의 핵심 명제: 실행 성공과 데이터 복구는 다르다."""
     _, verifier, expected = setup
-    verdict = _verify(verifier, list(expected["records"])[:10], expected)
+    total = len(expected["records"])
+    verdict = _verify(verifier, list(expected["records"])[:total - 2], expected)
     assert not verdict.passed
     by_kind = {r.kind: r for r in verdict.results}
     assert by_kind[CheckKind.EXECUTION].outcome is Outcome.PASS
@@ -59,7 +60,9 @@ def test_empty_result_is_inconclusive_not_pass(setup) -> None:
 def test_fixed_output_cannot_pass(setup) -> None:
     """AC-09: 고정값·조작된 배열로 검증을 통과할 수 없다."""
     _, verifier, expected = setup
-    forged = [{"LBRRY_SEQ_NO": "1", "LBRRY_NAME": "가짜", "ADRES": "", "TEL_NO": ""}] * 12
+    count = len(expected["records"])
+    forged = [{"LBRRY_SEQ_NO": "1", "LBRRY_NAME": "가짜", "ADRES": "", "TEL_NO": "",
+               "CODE_VALUE": "", "LBRRY_SE_NAME": ""}] * count
     verdict = _verify(verifier, forged, expected)
     assert not verdict.passed
     completeness = next(r for r in verdict.results if r.kind is CheckKind.COMPLETENESS)
@@ -72,7 +75,7 @@ def test_dropped_field_fails_fields_check(setup) -> None:
     verdict = _verify(verifier, stripped, expected)
     assert not verdict.passed
     fields = next(r for r in verdict.results if r.kind is CheckKind.FIELDS)
-    assert fields.metrics["missing_field_counts"]["ADRES"] == 12
+    assert fields.metrics["missing_field_counts"]["ADRES"] == len(expected["records"])
 
 
 def test_value_rule_violation_is_caught(setup) -> None:

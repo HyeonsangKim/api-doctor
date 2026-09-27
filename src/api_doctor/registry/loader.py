@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -96,11 +96,23 @@ class Contract:
 
 @dataclass(frozen=True, slots=True)
 class Probe:
+    """등록된 관측 절차 1건.
+
+    `invariant` 는 **비공개 기대값 없이 검사 가능한 성질**이어야 한다.
+    그래야 감사자가 정답을 보지 않고도 손실을 관측할 수 있다.
+    `runs` 가 2개 이상이면 실행끼리 대조하는 probe 다.
+    """
+
     probe_id: str
     description: str
-    params: dict[str, Any]
+    invariant: str
+    runs: tuple[dict[str, Any], ...]
     covers: tuple[str, ...]
     is_baseline: bool
+
+    @property
+    def sandbox_runs(self) -> int:
+        return len(self.runs)
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,6 +120,7 @@ class ProbeCatalog:
     version: str
     probes: tuple[Probe, ...]
     catalog_hash: str
+    invariants: dict[str, str] = field(default_factory=dict)
 
     def get(self, probe_id: str) -> Probe | None:
         return next((p for p in self.probes if p.probe_id == probe_id), None)
@@ -138,6 +151,7 @@ class Dataset:
     provenance: dict[str, Any]
     allowed_endpoints: tuple[Endpoint, ...]
     allowed_doc_domains: tuple[str, ...]
+    request_shape: dict[str, Any]
     skill: str | None
     contract: Contract
     probes: ProbeCatalog
@@ -193,7 +207,8 @@ def _parse_probes(path: Path) -> ProbeCatalog:
             Probe(
                 probe_id=str(p["probe_id"]),
                 description=str(p["description"]),
-                params=dict(p.get("params") or {}),
+                invariant=str(p["invariant"]),
+                runs=tuple(dict(r) for r in p["runs"]),
                 covers=tuple(str(c) for c in (p.get("covers") or [])),
                 is_baseline=bool(p.get("is_baseline", False)),
             )
@@ -207,7 +222,19 @@ def _parse_probes(path: Path) -> ProbeCatalog:
         raise RegistryInvalid(f"probe_id 가 중복됩니다: {path.name}")
     if sum(p.is_baseline for p in probes) != 1:
         raise RegistryInvalid(f"baseline probe 는 정확히 1개여야 합니다: {path.name}")
-    return ProbeCatalog(version=str(data["version"]), probes=probes, catalog_hash=digest)
+
+    known = set(data.get("invariants") or {})
+    for probe in probes:
+        if probe.invariant not in known:
+            raise RegistryInvalid(
+                f"{probe.probe_id}: 등록되지 않은 invariant {probe.invariant!r}"
+            )
+        if not probe.runs:
+            raise RegistryInvalid(f"{probe.probe_id}: runs 가 비어 있습니다")
+    return ProbeCatalog(
+        version=str(data["version"]), probes=probes, catalog_hash=digest,
+        invariants={k: str(v.get("description", "")) for k, v in (data.get("invariants") or {}).items()},
+    )
 
 
 def load_dataset(root: Path) -> Dataset:
@@ -231,6 +258,7 @@ def load_dataset(root: Path) -> Dataset:
                 for e in data["allowed_endpoints"]
             ),
             allowed_doc_domains=tuple(str(d) for d in (data.get("allowed_doc_domains") or [])),
+            request_shape=dict(data.get("request_shape") or {}),
             skill=data.get("skill"),
             contract=contract,
             probes=probes,
@@ -254,9 +282,18 @@ def _validate(dataset: Dataset) -> None:
     if not dataset.allowed_endpoints:
         problems.append("allowed_endpoints 가 비어 있습니다")
 
-    for endpoint in dataset.allowed_endpoints:
-        if not endpoint.url_prefix.startswith("https://"):
-            problems.append(f"HTTPS 가 아닌 endpoint: {endpoint.url_prefix}")
+    # PRD §4.5: HTTPS 미확인 소스는 key 를 전송하는 live 지원에서 제외하고
+    # 키 없는 fixture 로만 쓴다. 그래서 http 등록 자체는 막지 않고,
+    # live_ready 와 함께일 때만 거절한다.
+    if dataset.live_ready:
+        for endpoint in dataset.allowed_endpoints:
+            if not endpoint.url_prefix.startswith("https://"):
+                problems.append(
+                    f"live_ready 인데 HTTPS 가 아닙니다: {endpoint.url_prefix}. "
+                    "키를 전송하는 경로는 HTTPS 여야 합니다."
+                )
+    elif not dataset.live_blockers:
+        problems.append("live_ready 가 거짓이면 live_blockers 로 사유를 남겨야 합니다")
 
     # 계약이 요구하는 위험 영역을 catalog 가 전부 덮을 수 있어야 한다.
     # 못 덮으면 감사는 애초에 완료될 수 없으므로 등록 시점에 막는다.

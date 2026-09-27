@@ -3,6 +3,10 @@
 Zone S 의 후보가 보내는 요청을 **동결 스냅샷으로만** 해소한다.
 후보는 네트워크가 없고, broker 는 스냅샷 밖으로 나가지 않는다.
 API key 는 broker 경계 안에만 존재하며 후보·모델·보고서에 전달되지 않는다.
+
+이 API 의 페이지는 query 파라미터가 아니라 **경로의 범위 세그먼트**이고
+인증키도 경로에 들어간다 (2026-09-27 실측). 후보는 키 자리에
+자리표시자를 쓰고, broker 는 그 세그먼트를 읽지 않는다.
 """
 
 from __future__ import annotations
@@ -23,14 +27,17 @@ class SnapshotInvalid(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class Snapshot:
-    """동결된 공개 응답 모음."""
+    """동결된 공개 응답 모음. 키는 `"{start}:{end}"` 형태다."""
 
     snapshot_id: str
     dataset_id: str
+    service: str
     source_kind: str
     collected_at: str | None
-    default_per_page: int
-    total: int
+    scope_start: int
+    scope_end: int
+    scope_record_count: int
+    service_total_count: int
     pages: dict[str, Any]
     snapshot_hash: str
 
@@ -47,16 +54,20 @@ class Snapshot:
             raise SnapshotInvalid(
                 f"스냅샷의 dataset_id 불일치: {data.get('dataset_id')} != {dataset_id}"
             )
-        # 파일 **원문 바이트**를 해시한다. 로드 후 재직렬화하면
-        # 들여쓰기·키 순서·개행 하나에 hash 가 흔들려 STALE 판정이 거짓이 된다.
+        scope = data.get("scope") or {}
+        # 파일 **원문 바이트**를 해시한다. 재직렬화하면 개행 하나에 hash 가
+        # 흔들려 STALE 판정이 거짓이 된다.
         digest = "sha256:" + hashlib.sha256(raw).hexdigest()
         return cls(
             snapshot_id=str(data["snapshot_id"]),
             dataset_id=str(data["dataset_id"]),
+            service=str(data.get("service", "")),
             source_kind=str(data.get("source_kind", "unknown")),
             collected_at=data.get("collected_at"),
-            default_per_page=int(data.get("default_per_page", 10)),
-            total=int(data["total"]),
+            scope_start=int(scope.get("start", 1)),
+            scope_end=int(scope.get("end", 0)),
+            scope_record_count=int(data.get("scope_record_count", 0)),
+            service_total_count=int(data.get("service_total_count", 0)),
             pages=dict(data["pages"]),
             snapshot_hash=digest,
         )
@@ -68,8 +79,22 @@ class BrokerCall:
 
     url: str
     params: dict[str, Any]
-    outcome: str  # served | denied | not_in_snapshot
+    outcome: str  # served | denied
     reason: str | None = None
+    requested_range: tuple[int, int] | None = None
+
+    def sanitized(self) -> dict[str, Any]:
+        """trace 열람용. 키 자리를 지운 경로만 남긴다."""
+        parts = urlsplit(self.url)
+        segments = parts.path.strip("/").split("/")
+        if segments:
+            segments[0] = "{KEY}"
+        return {
+            "path": "/" + "/".join(segments),
+            "outcome": self.outcome,
+            "reason": self.reason,
+            "requested_range": list(self.requested_range) if self.requested_range else None,
+        }
 
 
 @dataclass(slots=True)
@@ -96,7 +121,9 @@ class DataBroker:
     def respond(self, url: str, params: dict[str, Any]) -> dict[str, Any]:
         """후보의 요청 1건을 해소한다. Zone S 에서 호출되는 콜백."""
         if self.call_count >= self.max_calls:
-            return self._deny(url, params, f"데이터 호출 상한 {self.max_calls}회를 초과했습니다.")
+            return self._deny(
+                url, params, f"데이터 호출 상한 {self.max_calls}회를 초과했습니다."
+            )
 
         endpoint = self._match_endpoint(url)
         if endpoint is None:
@@ -106,42 +133,79 @@ class DataBroker:
         if unknown:
             return self._deny(url, params, f"허용되지 않은 파라미터: {sorted(unknown)}")
 
-        page_key = self._page_key(params)
-        body = self.snapshot.pages.get(page_key)
-        if body is None:
-            # 스냅샷에 없는 변형은 추정하지 않는다 (PRD §3.2 unsupported_probe).
+        parsed = self._parse_request(url)
+        if parsed is None:
             return self._deny(
-                url, params, f"동결 스냅샷에 없는 요청입니다: {page_key}"
+                url, params,
+                "요청 경로 형태가 올바르지 않습니다. "
+                "{KEY}/json/<service>/<start>/<end>/ 형태여야 합니다.",
             )
+        service, start, end = parsed
+        if service != self.snapshot.service:
+            return self._deny(url, params, f"등록되지 않은 서비스: {service}")
 
-        self.calls.append(BrokerCall(url, params, "served"))
+        entry = self.snapshot.pages.get(f"{start}:{end}")
+        if entry is None:
+            # 스냅샷에 없는 변형은 추정하지 않는다 (PRD §3.2 unsupported_probe).
+            return self._deny(url, params, f"동결 스냅샷에 없는 범위입니다: {start}~{end}")
+
+        self.calls.append(
+            BrokerCall(url, params, "served", requested_range=(start, end))
+        )
         return {
             "status": 200,
-            "headers": {"Content-Type": "application/json"},
-            "body": json.dumps(body, ensure_ascii=False),
+            "headers": {"Content-Type": entry.get("content_type", "application/json")},
+            "body": entry["body"],
         }
+
+    # ------------------------------------------------------------------ 검사
 
     def _match_endpoint(self, url: str):
         parts = urlsplit(url)
         # URL 사용자정보·비표준 스킴을 먼저 막는다 (PRD §4.5).
-        if parts.scheme != "https" or "@" in parts.netloc:
+        if parts.scheme not in ("http", "https") or "@" in parts.netloc:
             return None
         for endpoint in self.dataset.allowed_endpoints:
             if endpoint.method == "GET" and url.startswith(endpoint.url_prefix):
                 return endpoint
         return None
 
-    def _page_key(self, params: dict[str, Any]) -> str:
-        """`per_page:page` 형태의 스냅샷 키로 정규화한다."""
+    def _parse_request(self, url: str) -> tuple[str, int, int] | None:
+        """`.../{KEY}/json/<service>/<start>/<end>/` 를 분해한다.
+
+        키 세그먼트는 **읽지 않는다**. 후보는 자리표시자를 쓰고 실제 키는
+        live 경로에서 broker 만 주입한다 (PRD §4.5).
+        """
+        segments = urlsplit(url).path.strip("/").split("/")
+        if len(segments) < 5:
+            return None
+        _key, fmt, service, start, end = segments[:5]
+        if fmt.lower() != "json":
+            return None
         try:
-            per_page = int(params.get("per_page", self.snapshot.default_per_page))
-            page = int(params.get("page", 1))
-        except (TypeError, ValueError):
-            return "invalid"
-        return f"{per_page}:{page}"
+            return service, int(start), int(end)
+        except ValueError:
+            return None
+
+    # ------------------------------------------------------------------ 관측
+
+    def requested_positions(self) -> set[int]:
+        """후보가 실제로 요청한 레코드 위치의 합집합. range_coverage 관측에 쓴다."""
+        covered: set[int] = set()
+        for call in self.calls:
+            if call.outcome == "served" and call.requested_range is not None:
+                start, end = call.requested_range
+                covered |= set(range(start, end + 1))
+        return covered
+
+    def trace(self) -> list[dict[str, Any]]:
+        """`inspect_trace` 가 반환하는 정제된 요청 기록."""
+        return [call.sanitized() for call in self.calls]
 
     def usage(self) -> dict[str, Any]:
         served = sum(c.outcome == "served" for c in self.calls)
         denied = sum(c.outcome == "denied" for c in self.calls)
-        return {"total": self.call_count, "served": served, "denied": denied,
-                "limit": self.max_calls}
+        return {
+            "total": self.call_count, "served": served,
+            "denied": denied, "limit": self.max_calls,
+        }

@@ -24,11 +24,23 @@ def test_hashes_are_stable_across_loads() -> None:
 
 def test_neutral_summary_excludes_expectations() -> None:
     """에이전트에게 가는 요약에 기대값·정답이 섞이면 안 된다."""
-    summary = load_registry()["seoul_library"].contract.neutral_summary()
-    serialized = str(summary)
+    import json as _json
+
+    dataset = load_registry()["seoul_library"]
+    summary = dataset.contract.neutral_summary()
+    serialized = _json.dumps(summary, ensure_ascii=False)
+
+    # 숨겨야 하는 것은 **정답 그 자체**다.
+    # 조회 범위(query)는 에이전트가 무엇을 가져와야 하는지 알기 위해 공개된다.
     assert "expected_record_count" not in summary
-    assert "12" not in serialized, "기대 건수가 요약에 노출됐습니다"
     assert "identity_values" not in serialized
+    assert "records" not in summary
+
+    expected = _json.loads(dataset.expected_path().read_text(encoding="utf-8"))
+    for identity in expected["identity_values"]:
+        assert identity not in serialized, f"식별값 {identity} 이 요약에 노출됐습니다"
+    for record in expected["records"]:
+        assert record["LBRRY_NAME"] not in serialized
 
 
 def test_probe_catalog_covers_every_audit_requirement() -> None:
@@ -46,7 +58,8 @@ def test_baseline_probe_does_not_count_toward_coverage() -> None:
     assert baseline.covers == ()
 
 
-def test_rejects_non_https_endpoint(tmp_path) -> None:
+def test_http_endpoint_allowed_only_while_not_live(tmp_path) -> None:
+    """PRD §4.5: HTTPS 미지원 소스는 fixture 로만 쓰고 live 는 막는다."""
     src = load_registry()["seoul_library"].root
     dst = tmp_path / "seoul_library"
     dst.mkdir()
@@ -57,8 +70,12 @@ def test_rejects_non_https_endpoint(tmp_path) -> None:
             target.write_bytes(child.read_bytes())
 
     data = yaml.safe_load((dst / "dataset.yaml").read_text())
-    data["allowed_endpoints"][0]["url_prefix"] = "http://openapi.seoul.go.kr:8088/"
-    (dst / "dataset.yaml").write_text(yaml.safe_dump(data, allow_unicode=True))
+    assert data["allowed_endpoints"][0]["url_prefix"].startswith("http://")
+    assert data["live_ready"] is False
+    load_dataset(dst)   # fixture 전용이므로 등록 자체는 허용된다
 
+    # live_ready 로 올리면 HTTPS 가 아니라서 거절돼야 한다.
+    data["live_ready"] = True
+    (dst / "dataset.yaml").write_text(yaml.safe_dump(data, allow_unicode=True))
     with pytest.raises(RegistryInvalid, match="HTTPS"):
         load_dataset(dst)

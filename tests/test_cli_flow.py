@@ -185,7 +185,8 @@ def test_live_source_refused_while_unverified(cli, home) -> None:
     )
     assert result.exit_code == 2
     assert payload["error"]["code"] == "UNSUPPORTED_INPUT"
-    assert "API key" in payload["error"]["message"]
+    # 실측으로 확인된 차단 사유가 그대로 사용자에게 전달돼야 한다.
+    assert "HTTPS" in payload["error"]["message"]
 
 
 def test_secret_in_code_blocks_before_any_transmission(cli, home, tmp_path) -> None:

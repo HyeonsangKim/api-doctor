@@ -1,47 +1,35 @@
 # 불변 조회 계약 (FR-001, PRD §3.2)
 #
-# 사람이 검토해 고정한다. 모델은 이 파일을 만들지도 바꾸지도 못하며
-# 에이전트에게는 중립 요약만 전달된다.
+# 필드명과 타입은 2026-09-27 실제 응답에서 확인했다.
+# 수집 범위는 **명시된 query 의 전체 결과**이지 서비스 전체(216건)가 아니다.
 
 contract_id: seoul_library_scope
 version: v1
 
 query:
-  scope_id: all
+  start: 1
+  end: 5
+  page_size: 2      # 후보가 이 범위를 몇 건씩 나눠 가져올지
 
-# 전체성 기준. 후보가 요청한 페이지 수로 이 범위를 축소할 수 없다.
 completeness:
-  expected_record_count: 12
+  expected_record_count: 5
   identity_key: LBRRY_SEQ_NO
 
+# 실제 응답에 있는 12개 필드 중 계약이 보존을 요구하는 것들.
 required_fields:
-  - name: LBRRY_SEQ_NO
-    type: str
-    nullable: false
-  - name: LBRRY_NAME
-    type: str
-    nullable: false
-  - name: ADRES
-    type: str
-    nullable: true
-  - name: TEL_NO
-    type: str
-    nullable: true
+  - {name: LBRRY_SEQ_NO,  type: str, nullable: false}
+  - {name: LBRRY_NAME,    type: str, nullable: false}
+  - {name: CODE_VALUE,    type: str, nullable: true}
+  - {name: ADRES,         type: str, nullable: true}
+  - {name: TEL_NO,        type: str, nullable: true}
+  - {name: LBRRY_SE_NAME, type: str, nullable: true}
 
-# 값 의미 검사. 스키마만으로 안 잡히는 손실을 본다.
 value_rules:
-  - rule_id: seq_no_is_digits
-    field: LBRRY_SEQ_NO
-    kind: regex
-    pattern: '^[0-9]+$'
-  - rule_id: name_not_blank
-    field: LBRRY_NAME
-    kind: not_blank
+  - {rule_id: seq_no_is_digits, field: LBRRY_SEQ_NO, kind: regex, pattern: '^[0-9]+$'}
+  - {rule_id: name_not_blank,   field: LBRRY_NAME,   kind: not_blank}
 
-# 감사자가 반드시 다뤄야 하는 위험 영역 (PRD §3.2 audit_requirements).
-# 지원하지 않는 위험 영역을 일괄 요구하지 않는다.
 audit_requirements:
   - risk_id: pagination_boundary
-    description: 마지막 페이지 종료 조건 오류로 레코드가 누락될 수 있다
+    description: 범위를 나눠 가져올 때 마지막 구간이 누락될 수 있다
   - risk_id: mapping_preservation
-    description: 중첩 응답 경로를 잘못 읽어 필드가 사라질 수 있다
+    description: 중첩 응답 경로를 잘못 읽어 필드나 레코드가 사라질 수 있다

@@ -2,94 +2,85 @@
   "contract_id": "seoul_library_scope",
   "contract_version": "v1",
   "identity_values": [
-    "1",
-    "2",
-    "3",
-    "4",
-    "5",
-    "6",
-    "7",
-    "8",
-    "9",
-    "10",
-    "11",
-    "12"
+    "1935",
+    "1066",
+    "2815",
+    "48",
+    "2843"
   ],
-  "record_count": 12,
+  "record_count": 5,
   "records": [
     {
-      "ADRES": "중구 세종대로 110",
-      "LBRRY_NAME": "서울도서관",
-      "LBRRY_SEQ_NO": "1",
-      "TEL_NO": "02-2133-0300"
+      "ADRES": "서울특별시 강남구 자곡로 116",
+      "CODE_VALUE": "강남구",
+      "FDRM_CLOSE_DATE": "매주 화요일 및 법정공휴일",
+      "GU_CODE": "0008",
+      "HMPG_URL": "http://library.gangnam.go.kr/mglib",
+      "LBRRY_NAME": "강남구립못골도서관",
+      "LBRRY_SEQ_NO": "1935",
+      "LBRRY_SE_NAME": "공공도서관",
+      "OP_TIME": "평일 : 09:00~22:00, 주말 : 09:00~22:00",
+      "TEL_NO": "02-459-5522",
+      "XCNTS": "37.47153836",
+      "YDNTS": "127.096582"
     },
     {
-      "ADRES": "강남구 학동로 425",
-      "LBRRY_NAME": "강남도서관",
-      "LBRRY_SEQ_NO": "2",
-      "TEL_NO": "02-3448-4741"
+      "ADRES": "서울특별시 강남구 테헤란로8길 36. 4층",
+      "CODE_VALUE": "강남구",
+      "FDRM_CLOSE_DATE": "매주 화요일 및 법정 공휴일",
+      "GU_CODE": "0008",
+      "HMPG_URL": "https://library.gangnam.go.kr/ysplib/index.do",
+      "LBRRY_NAME": "강남역삼푸른솔도서관",
+      "LBRRY_SEQ_NO": "1066",
+      "LBRRY_SE_NAME": "공공도서관",
+      "OP_TIME": "평일 : 09:00~18:00, 주말 : 09:00~17:00",
+      "TEL_NO": "02-2051-1178",
+      "XCNTS": "37.4964968",
+      "YDNTS": "127.0320274"
     },
     {
-      "ADRES": "강동구 양재대로 1428",
-      "LBRRY_NAME": "강동도서관",
-      "LBRRY_SEQ_NO": "3",
-      "TEL_NO": "02-488-2001"
+      "ADRES": "서울특별시 강남구 개포로 110길 54",
+      "CODE_VALUE": "강남구",
+      "FDRM_CLOSE_DATE": "매주 화요일 및 법정공휴일",
+      "GU_CODE": "0008",
+      "HMPG_URL": "https://library.gangnam.go.kr/hnkklib/",
+      "LBRRY_NAME": "개포하늘꿈도서관",
+      "LBRRY_SEQ_NO": "2815",
+      "LBRRY_SE_NAME": "공공도서관",
+      "OP_TIME": "평일 : 09:00~22:00, 주말 : 09:00~17:00",
+      "TEL_NO": "02-451-1511",
+      "XCNTS": "37.4906692944468",
+      "YDNTS": "127.080356908422"
     },
     {
-      "ADRES": "강남구 논현로 6",
-      "LBRRY_NAME": "개포도서관",
-      "LBRRY_SEQ_NO": "4",
-      "TEL_NO": "02-575-1450"
+      "ADRES": "서울특별시 강남구 학동로43길 17(논현동) 논현2동주민센터 6층",
+      "CODE_VALUE": "강남구",
+      "FDRM_CLOSE_DATE": "매주 화요일 및 법정공휴일",
+      "GU_CODE": "0008",
+      "HMPG_URL": "https://library.gangnam.go.kr/nhlib",
+      "LBRRY_NAME": "논현도서관",
+      "LBRRY_SEQ_NO": "48",
+      "LBRRY_SE_NAME": "공공도서관",
+      "OP_TIME": "평일 : 09:00~22:00, 주말 : 09:00~17:00",
+      "TEL_NO": "02-3443-7650",
+      "XCNTS": "37.5172779092976",
+      "YDNTS": "127.037187913597"
     },
     {
-      "ADRES": "강동구 고덕로 351",
-      "LBRRY_NAME": "고덕평생학습관",
-      "LBRRY_SEQ_NO": "5",
-      "TEL_NO": "02-6956-8000"
-    },
-    {
-      "ADRES": "구로구 구로중앙로 174",
-      "LBRRY_NAME": "구로도서관",
-      "LBRRY_SEQ_NO": "6",
-      "TEL_NO": "02-861-3529"
-    },
-    {
-      "ADRES": "용산구 소월로 109",
-      "LBRRY_NAME": "남산도서관",
-      "LBRRY_SEQ_NO": "7",
-      "TEL_NO": "02-754-7338"
-    },
-    {
-      "ADRES": "노원구 덕릉로 460",
-      "LBRRY_NAME": "노원평생학습관",
-      "LBRRY_SEQ_NO": "8",
-      "TEL_NO": "02-2116-3700"
-    },
-    {
-      "ADRES": "도봉구 덕릉로 460",
-      "LBRRY_NAME": "도봉도서관",
-      "LBRRY_SEQ_NO": "9",
-      "TEL_NO": "02-999-6800"
-    },
-    {
-      "ADRES": "동대문구 천호대로 4길 27",
-      "LBRRY_NAME": "동대문도서관",
-      "LBRRY_SEQ_NO": "10",
-      "TEL_NO": "02-2248-9500"
-    },
-    {
-      "ADRES": "마포구 홍익로2길 16",
-      "LBRRY_NAME": "마포평생학습관",
-      "LBRRY_SEQ_NO": "11",
-      "TEL_NO": "02-3153-5300"
-    },
-    {
-      "ADRES": "종로구 북촌로5길 48",
-      "LBRRY_NAME": "정독도서관",
-      "LBRRY_SEQ_NO": "12",
-      "TEL_NO": "02-2011-5799"
+      "ADRES": "서울특별시 강남구 논현로131길 40, 4~5층",
+      "CODE_VALUE": "강남구",
+      "FDRM_CLOSE_DATE": "매주 월요일 및 법정공휴일",
+      "GU_CODE": "0008",
+      "HMPG_URL": "https://library.gangnam.go.kr/nmmlib",
+      "LBRRY_NAME": "논현문화마루도서관",
+      "LBRRY_SEQ_NO": "2843",
+      "LBRRY_SE_NAME": "공공도서관",
+      "OP_TIME": "평일 : 09:00~18:00, 주말 : 09:00~17:00",
+      "TEL_NO": "02-512-8580",
+      "XCNTS": "37.51384422",
+      "YDNTS": "127.02710693"
     }
   ],
-  "snapshot_hash": "sha256:08b6914b704a935224dfd9c3f02d173a48597b4557ae9df26502d3b40feeaffc",
-  "snapshot_id": "seoul_library_synthetic_v1"
+  "snapshot_hash": "sha256:64842a80cdd00299b8777d911136706d4860838f3d7096c616add3662b1b0ae8",
+  "snapshot_id": "seoul_library_scope1_5"
 }

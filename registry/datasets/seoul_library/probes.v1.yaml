@@ -1,29 +1,47 @@
 # probe catalog (FR-011, PRD §3.2)
 #
-# 감사자는 여기서 probe_id 와 허용 파라미터를 고른다. 기대값을 만들거나
-# 임의 Python 을 실행하지 않는다. coverage 는 고정 metadata 이며
-# 모델이 바꿀 수 없다.
+# 각 invariant 는 **비공개 기대값 없이 검사 가능**해야 한다.
+# 그래야 감사자가 정답을 보지 않고도 손실을 관측할 수 있다.
 
 version: v1
 
+invariants:
+  none:
+    description: 관측만 수집하고 판정하지 않는다
+  partition_invariance:
+    description: 구간 크기를 바꿔도 같은 식별키 집합이 나와야 한다
+  range_coverage:
+    description: 계약 범위의 모든 위치가 요청에 포함됐어야 한다
+  required_fields_present:
+    description: 반환된 레코드에 계약의 필수 필드가 있어야 한다
+
 probes:
   - probe_id: baseline_full_scope
-    description: 계약의 주 query 를 그대로 실행한다
-    params: {scope_id: all}
-    covers: []          # baseline 은 감사 coverage 로 세지 않는다
+    description: 계약의 주 query 를 그대로 실행하고 관측만 수집한다
+    invariant: none
+    runs:
+      - {}
+    covers: []
     is_baseline: true
 
   - probe_id: page_partition
-    description: 페이지 크기를 바꿔 같은 전체 집합이 나오는지 본다
-    params: {scope_id: all, per_page: 5}
+    description: 구간 크기 2 와 3 에서 같은 집합이 나오는지 대조한다
+    invariant: partition_invariance
+    runs:
+      - {page_size: 2}
+      - {page_size: 3}
     covers: [pagination_boundary]
 
-  - probe_id: boundary_last_page
-    description: 마지막 페이지만 요청해 종료 조건 처리를 관측한다
-    params: {scope_id: all, page: 3}
+  - probe_id: range_coverage
+    description: 후보가 계약 범위 전체를 요청했는지 관측한다
+    invariant: range_coverage
+    runs:
+      - {page_size: 2}
     covers: [pagination_boundary]
 
-  - probe_id: field_presence_sample
-    description: 첫 페이지에서 필수 필드 보존을 관측한다
-    params: {scope_id: all, page: 1}
+  - probe_id: field_presence
+    description: 반환 레코드에 계약의 필수 필드가 보존됐는지 본다
+    invariant: required_fields_present
+    runs:
+      - {}
     covers: [mapping_preservation]

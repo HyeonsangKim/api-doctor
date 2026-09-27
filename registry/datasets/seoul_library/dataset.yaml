@@ -1,38 +1,49 @@
 # 지원 데이터셋 등록 (FR-001)
 #
-# 출처 표기 원칙: 이 파일의 provenance 는 **실제로 한 일**만 적는다.
-# 아직 공식 API 를 호출한 적이 없으므로 source_kind 는 synthetic_fixture 다.
-# 실제 수집 후에는 live_capture 로 바꾸고 collected_at 을 채운다.
+# 아래 사실은 2026-09-27 실제 호출로 확인했다 (sample 키, 공개 데이터).
+#  · 서비스명 SeoulPublicLibraryInfo, 서비스 전체 216건
+#  · 페이지는 query 파라미터가 아니라 **경로의 START/END 범위**다
+#  · 인증키가 **URL 경로에 들어간다**
+#  · HTTPS 는 지원하지 않는다 (TLS 핸드셰이크 실패). http 만 응답한다
+#  · /json/ 로 요청해도 오류는 XML 로 온다
 
 dataset_id: seoul_library
-display_name: 서울 공공도서관 현황정보
+display_name: 서울시 공공도서관 현황정보
 contract_id: seoul_library_scope
 contract_version: v1
 
-# live 수집 준비 여부. 키·HTTPS·범위가 확인되기 전에는 거짓이다.
+# PRD §4.5: HTTPS 미확인 데이터 소스는 key 를 전송하는 live 지원에서 제외한다.
+# 이 endpoint 는 HTTPS 를 지원하지 않는 것이 실측으로 확인됐으므로
+# live_ready 는 앞으로도 거짓이다. fixture 전용이다.
 live_ready: false
 live_blockers:
-  - 공식 API key 미발급
-  - 실제 서비스명·필드·페이지 지원 여부 미확인 (PRD §3.1)
+  - HTTPS 미지원 (2026-09-27 실측: TLS 핸드셰이크 실패, http 만 응답)
+  - 인증키가 URL 경로에 포함되는 방식이라 키 유출 경계 재설계 필요
+  - 전체 216건 수집에는 발급 키 필요 (sample 키는 1~5행 한정)
 
 provenance:
-  source_kind: synthetic_fixture
-  authored_by: 개발자 작성
-  modeled_on: 서울 열린데이터광장 OpenAPI 의 공개된 응답 형태
+  source_kind: live_capture
+  service: SeoulPublicLibraryInfo
+  captured_with: sample key (공개 예제 키)
+  captured_at: "2026-09-27"
   reference_url: https://data.seoul.go.kr/dataList/OA-15480/A/1/datasetView.do
-  collected_at: null
+  api_guide_url: https://data.seoul.go.kr/together/guide/useGuide.do
   license_note: >-
-    합성 fixture 이므로 재배포 제약이 없다. 실제 응답으로 교체할 때는
-    원문 재배포 가능 여부를 별도 확인하고 출처를 표시한다.
+    서울 열린데이터광장 공공데이터. 출처를 표시한다.
+    원문 재배포 조건은 별도로 확인하지 않았다.
 
-# 후보와 collector 가 접근할 수 있는 유일한 endpoint 목록.
-# 모델은 이 값을 쓰지 못하고 broker 가 대조만 한다.
+# 실제 요청 형태. {KEY} 는 broker 가 주입하는 자리표시자이며
+# 후보 코드와 모델은 실제 키를 보지 못한다 (PRD §4.5).
+request_shape:
+  template: "{scheme}://openapi.seoul.go.kr:8088/{KEY}/json/SeoulPublicLibraryInfo/{start}/{end}/"
+  pagination: path_range      # 1-based inclusive
+  key_location: url_path
+
 allowed_endpoints:
   - method: GET
-    url_prefix: https://openapi.seoul.go.kr:8088/
-    allowed_params: [page, per_page, scope_id]
+    url_prefix: http://openapi.seoul.go.kr:8088/
+    allowed_params: []        # 경로 기반이라 query 파라미터를 쓰지 않는다
 
-# 문서 탐색 허용 도메인 (FR-004)
 allowed_doc_domains:
   - data.seoul.go.kr
 
