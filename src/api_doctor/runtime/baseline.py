@@ -307,7 +307,7 @@ def _execute(
             f"공급자 응답이 {provider.classification} 로 분류되었습니다 "
             f"({provider.code}). 코드 수리 없이 종료합니다."
         )
-    elif outcome.denials and outcome.records is None:
+    elif any(d.is_policy_violation for d in outcome.denials) and outcome.records is None:
         status = RunStatus.POLICY_BLOCKED
         needs_repair = False
         summary = "격리 정책이 후보의 동작을 차단했습니다."

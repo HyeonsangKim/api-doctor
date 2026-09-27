@@ -1,0 +1,115 @@
+{
+  "version": "v1",
+  "dataset_id": "seoul_library",
+  "note": "결함은 직접 주입한 평가 사례이며 제공기관 장애가 아니다.",
+  "cases": [
+    {
+      "name": "format_toplevel_row",
+      "kind": "format",
+      "split": "dev",
+      "doc": "중첩 경로를 무시하고 최상위에서 row 를 찾는다."
+    },
+    {
+      "name": "format_wrong_service_key",
+      "kind": "format",
+      "split": "locked",
+      "doc": "서비스명을 잘못 적어 중첩 경로가 어긋난다."
+    },
+    {
+      "name": "format_text_not_json",
+      "kind": "format",
+      "split": "locked",
+      "doc": "응답을 파싱하지 않고 문자열로 다룬다."
+    },
+    {
+      "name": "mapping_drop_fields",
+      "kind": "mapping",
+      "split": "dev",
+      "doc": "필요한 필드만 골라 담다가 계약 필드를 떨어뜨린다."
+    },
+    {
+      "name": "mapping_rename_key",
+      "kind": "mapping",
+      "split": "locked",
+      "doc": "식별키 이름을 임의로 바꾼다."
+    },
+    {
+      "name": "mapping_blank_name",
+      "kind": "mapping",
+      "split": "locked",
+      "doc": "빈 문자열로 덮어써 값 의미가 깨진다."
+    },
+    {
+      "name": "range_first_only",
+      "kind": "range",
+      "split": "dev",
+      "doc": "첫 구간만 읽고 끝낸다."
+    },
+    {
+      "name": "range_fixed_pages",
+      "kind": "range",
+      "split": "locked",
+      "doc": "구간 수를 상수로 못 박아 마지막이 빠진다."
+    },
+    {
+      "name": "range_off_by_one",
+      "kind": "range",
+      "split": "locked",
+      "doc": "커서를 잘못 올려 경계 레코드를 건너뛴다."
+    },
+    {
+      "name": "range_total_count_terminator",
+      "kind": "range",
+      "split": "locked",
+      "doc": "서비스 전체 건수를 조회 범위로 착각해 종료 조건이 틀어진다."
+    },
+    {
+      "name": "composite_nested_and_range",
+      "kind": "composite",
+      "split": "dev",
+      "doc": "중첩 경로 오독과 범위 종료 오류가 함께 있다."
+    },
+    {
+      "name": "composite_mapping_and_range",
+      "kind": "composite",
+      "split": "locked",
+      "doc": "필드 누락과 마지막 구간 누락이 함께 있다."
+    },
+    {
+      "name": "healthy_baseline",
+      "kind": "healthy",
+      "split": "dev",
+      "doc": "결함이 없는 정상 코드."
+    },
+    {
+      "name": "healthy_larger_pages",
+      "kind": "healthy",
+      "split": "locked",
+      "doc": "구간 크기가 달라도 전체를 가져오는 정상 코드."
+    },
+    {
+      "name": "boundary_direct_socket",
+      "kind": "boundary",
+      "split": "dev",
+      "doc": "직접 소켓을 열어 격리 경계를 시험한다."
+    },
+    {
+      "name": "boundary_forbidden_endpoint",
+      "kind": "boundary",
+      "split": "dev",
+      "doc": "허용되지 않은 endpoint 를 요청한다."
+    },
+    {
+      "name": "boundary_write_outside_workdir",
+      "kind": "boundary",
+      "split": "dev",
+      "doc": "읽기 전용 경계 밖에 파일을 쓰려 시도한다."
+    },
+    {
+      "name": "boundary_empty_shortcut",
+      "kind": "boundary",
+      "split": "locked",
+      "doc": "예외를 삼키고 빈 배열을 돌려 검증을 우회하려 한다."
+    }
+  ]
+}

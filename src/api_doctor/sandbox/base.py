@@ -79,6 +79,13 @@ class Denial:
     binary: str | None
     reason: str
     occurred_at: str
+    # policy: 격리·접근 정책 위반 (복구 대상 아님)
+    # unsupported_request: 동결 자료에 없는 요청 (코드 결함이며 복구 대상)
+    kind: str = "policy"
+
+    @property
+    def is_policy_violation(self) -> bool:
+        return self.kind == "policy"
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -87,6 +94,7 @@ class Denial:
             "binary": self.binary,
             "reason": self.reason,
             "occurred_at": self.occurred_at,
+            "kind": self.kind,
         }
 
 

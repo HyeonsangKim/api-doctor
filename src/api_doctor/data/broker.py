@@ -115,9 +115,17 @@ class DataBroker:
     def call_count(self) -> int:
         return len(self.calls)
 
-    def _deny(self, url: str, params: dict[str, Any], reason: str) -> dict[str, Any]:
+    def _deny(
+        self, url: str, params: dict[str, Any], reason: str, kind: str = "policy"
+    ) -> dict[str, Any]:
+        """거절한다.
+
+        `kind` 가 중요하다. 허용 밖 endpoint 는 **정책 위반**이지만,
+        동결 자료에 없는 범위는 후보의 **코드 결함**이므로 복구 대상이다.
+        둘을 같이 다루면 고칠 수 있는 버그가 policy_blocked 로 끝난다.
+        """
         self.calls.append(BrokerCall(url, params, "denied", reason))
-        return {"denied": True, "reason": reason}
+        return {"denied": True, "reason": reason, "kind": kind}
 
     def respond(self, url: str, params: dict[str, Any]) -> dict[str, Any]:
         """후보의 요청 1건을 해소한다. Zone S 에서 호출되는 콜백."""
@@ -140,6 +148,7 @@ class DataBroker:
                 url, params,
                 "요청 경로 형태가 올바르지 않습니다. "
                 "{KEY}/json/<service>/<start>/<end>/ 형태여야 합니다.",
+                kind="unsupported_request",
             )
         service, start, end = parsed
         if service != self.snapshot.service:
@@ -148,7 +157,10 @@ class DataBroker:
         entry = self.snapshot.pages.get(f"{start}:{end}")
         if entry is None:
             # 스냅샷에 없는 변형은 추정하지 않는다 (PRD §3.2 unsupported_probe).
-            return self._deny(url, params, f"동결 스냅샷에 없는 범위입니다: {start}~{end}")
+            return self._deny(
+                url, params, f"동결 스냅샷에 없는 범위입니다: {start}~{end}",
+                kind="unsupported_request",
+            )
 
         self.calls.append(
             BrokerCall(url, params, "served", requested_range=(start, end),

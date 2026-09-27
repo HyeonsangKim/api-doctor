@@ -185,6 +185,57 @@ def run(
     raise typer.Exit(result.status.exit_code)
 
 
+@app.command(name="eval")
+def evaluate(
+    split: Annotated[str, typer.Option("--split", help="dev | locked | all")] = "all",
+    as_json: Annotated[bool, typer.Option("--json", help="JSON 으로 출력")] = False,
+) -> None:
+    """평가 세트로 검출 정확도를 측정한다. 모델을 호출하지 않는다."""
+    from ..evaluation.runner import run_detection
+
+    root = Path(__file__).resolve().parents[3] / "eval"
+    if not (root / "cases.json").is_file():
+        _fail("NOT_FOUND", f"평가 세트를 찾을 수 없습니다: {root}", 2, as_json)
+        return
+
+    def on_case(result: Any) -> None:
+        if not as_json:
+            mark = "[green]✓[/]" if result.detected else "[red]✗[/]"
+            baseline = {True: "통과", False: "실패", None: "미실행"}[
+                result.baseline_passed
+            ]
+            err.print(
+                f"  {mark} {result.name:34} [dim]{result.kind:10}"
+                f"{result.split:7}baseline={baseline:5}"
+                + (f" 차단{result.policy_denials}" if result.policy_denials else "")
+                + "[/]"
+            )
+
+    store_root = RunStore().root.parent / "eval-runs"
+    if not as_json:
+        err.print(f"[bold]평가 세트[/] split={split}\n")
+    report = run_detection(
+        cases_root=root, store_root=store_root, split=split, on_case=on_case
+    )
+
+    payload = report.to_json()
+    if not as_json:
+        summary = payload["summary"]
+        err.print()
+        err.print(f"[bold]검출 {summary['detection_correct']}/{summary['total']}[/]")
+        fp, fs = summary["false_positives"], summary["false_successes"]
+        err.print(
+            f"  정상 훼손 [{'green' if fp == 0 else 'red'}]{fp}건[/]"
+            f" · 거짓 성공 [{'green' if fs == 0 else 'red'}]{fs}건[/]"
+        )
+        for kind, row in sorted(summary["by_kind"].items()):
+            style = "green" if row["ok"] == row["total"] else "red"
+            err.print(f"  {kind:12} [{style}]{row['ok']}/{row['total']}[/]")
+        err.print(f"\n[dim]{summary['recovery_skipped_reason']}[/]")
+    _emit(payload, as_json)
+    raise typer.Exit(0 if report.detected == len(report.results) else 3)
+
+
 @app.command()
 def show(
     run_id: Annotated[str, typer.Argument(help="작업 ID")],

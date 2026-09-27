@@ -345,6 +345,7 @@ class ContainerBackend:
                                 binary="python",
                                 reason=str(reply.get("reason", "broker 거절")),
                                 occurred_at=utc_now(),
+                                kind=str(reply.get("kind", "policy")),
                             )
                         )
                     proc.stdin.write(json.dumps({"t": "res", **reply}, ensure_ascii=False) + "\n")
@@ -410,6 +411,17 @@ _MESSAGE_HINTS = (
 _EXCEPTION_HINTS = ("URLError", "gaierror", "ConnectionError", "socket.timeout")
 _BLOCKED_ERRNOS = {"-2", "-3", "101", "111", "113"}
 
+# 파일시스템 경계가 막았을 때의 시그니처 (AC-15).
+# 후보에게는 작업 폴더 밖을 건드릴 정당한 이유가 없으므로
+# 이 오류들은 전부 차단 기록으로 승격한다.
+_FS_HINTS = (
+    "Read-only file system",
+    "Permission denied",
+    "Operation not permitted",
+)
+_FS_ERRNOS = {"1", "13", "30"}
+_PATH_RE = re.compile(r"['\"](/[^'\"\s]{2,})['\"]")
+
 # 후보 코드에 박힌 목적지를 추출해 denial 에 남긴다 (AC-15: 목적지 필드).
 _URL_RE = re.compile(r"https?://[^\s'\")]+")
 _ERRNO_RE = re.compile(r"Errno (-?\d+)")
@@ -429,24 +441,34 @@ def _denials_from_text(text: str, backend_id: BackendId) -> list[Denial]:
         stripped = line.strip()
         errno_match = _ERRNO_RE.search(stripped)
         errno = errno_match.group(1) if errno_match else None
-        qualifies = any(h in stripped for h in _MESSAGE_HINTS) or (
+        network = any(h in stripped for h in _MESSAGE_HINTS) or (
             errno in _BLOCKED_ERRNOS and any(h in stripped for h in _EXCEPTION_HINTS)
         )
-        if not qualifies:
+        filesystem = errno in _FS_ERRNOS and any(h in stripped for h in _FS_HINTS)
+        if not (network or filesystem):
             continue
         signature = errno or "unknown"
-        key = (destination, signature)
+        if filesystem:
+            found = _PATH_RE.search(stripped)
+            key = (found.group(1) if found else "filesystem", signature)
+        else:
+            key = (destination, signature)
         # 가장 구체적인(긴) 줄을 대표 사유로 남긴다.
         if key not in groups or len(stripped) > len(groups[key]):
             groups[key] = stripped
 
-    return [
-        Denial(
-            backend_id=backend_id,
-            destination=dest,
-            binary="python",
-            reason=f"network egress blocked (errno {sig}): {line[:200]}",
-            occurred_at=utc_now(),
+    denials: list[Denial] = []
+    for (dest, sig), line in groups.items():
+        is_fs = sig in _FS_ERRNOS and any(h in line for h in _FS_HINTS)
+        label = "filesystem access blocked" if is_fs else "network egress blocked"
+        denials.append(
+            Denial(
+                backend_id=backend_id,
+                destination=dest,
+                binary="python",
+                reason=f"{label} (errno {sig}): {line[:200]}",
+                occurred_at=utc_now(),
+                kind="policy",
+            )
         )
-        for (dest, sig), line in groups.items()
-    ]
+    return denials
