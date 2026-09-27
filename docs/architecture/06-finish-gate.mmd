@@ -1,0 +1,12 @@
+flowchart TD
+  IN["request_finish · 텍스트 종료 · 예외 · 루프상한"] --> G0{취소·정책·예산<br/>강제중단 있었나}
+  G0 -->|있음| HALT["해당 중단 상태 확정<br/>새 코드 실행 없음 · verified 승격 없음"]
+  G0 -->|없음| G1{현재 hash 의<br/>고정 검증 통과}
+  G1 -->|미실행| RUNV["종료 검증 1회 실행<br/>예약 슬롯 정산"]
+  RUNV --> G1
+  G1 -->|실패| FAIL["verification_failed<br/>또는 재계획 여유 확인"]
+  G1 -->|통과| G2{현재 hash 에 대한<br/>감사 완료}
+  G2 -->|미흡| MA["MISSING_AUDIT → main"]
+  G2 -->|완료| G3{계약 관련<br/>미해결 finding}
+  G3 -->|있음| INC["verification_inconclusive"]
+  G3 -->|없음| OK["verified_repaired"]

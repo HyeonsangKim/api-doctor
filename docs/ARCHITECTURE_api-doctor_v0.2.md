@@ -5,6 +5,9 @@
 > **상태**: 설계 문서. 구현 착수 전 기준선.
 > **대상 환경 (실측)**: darwin 25.5.0 (Apple Silicon), Python 3.14.2 설치됨, `uv` 있음, `docker` 있음, `podman` 없음, `NVIDIA_API_KEY` 미설정
 
+> **그림**: 본문의 mermaid 는 [docs/architecture/](architecture/README.md) 에 SVG·PNG 로 렌더돼 있다.
+> 기준 그림은 [01 신뢰 영역](architecture/01-trust-zones.png) 이다.
+
 이 문서는 PRD의 요구사항을 **구현 가능한 경계·모듈·계약**으로 옮긴다. PRD의 내용을 반복하지 않고, PRD가 "무엇을"이라면 이 문서는 "어디에 무엇을 두고 무엇이 무엇을 못 하게 막는가"를 정한다.
 
 ---
@@ -28,52 +31,61 @@ flowchart TB
   end
 
   subgraph ZT["Zone T · 신뢰 영역 · LLM 없음"]
-    direction TB
-    REG["Registry<br/>dataset · contract · probe catalog · skills"]
-    ORCH["LangGraph Runtime<br/>stage 전이 · 취소 · 중단"]
-    BUD["Budget Gateway<br/>호출 · 토큰 · 시간 · 실행 원장"]
-    TG["Tool Gateway<br/>역할 인가 · hash 검사 · 가시성"]
-    BRK["Data Broker<br/>API key 보유 · 동결 응답만 반환"]
-    COL["Trusted Collector<br/>독립 수집 후 freeze"]
-    VER["Fixed Verifier<br/>고정 계약 · 기대값 · 최종 판정"]
-    EVT["Event Store<br/>events.jsonl · manifest · evidence"]
-    MG["Model Gateway<br/>모든 LLM 호출의 단일 통로"]
+    direction LR
+    ORCH["LangGraph Runtime<br/>stage · 취소 · 중단"]
+    TG["Tool Gateway<br/>역할 인가 · hash · 가시성"]
+    MG["Model Gateway<br/>LLM 호출 단일 통로"]
+    BUD["Budget Gateway<br/>호출 · 토큰 · 시간 원장"]
+    VER["Fixed Verifier<br/>최종 판정"]
+    REG["Registry<br/>contract · probe · 기대값"]
+    EVT["Event Store<br/>events.jsonl · manifest"]
+    BRK["Data Broker<br/>API key 보유 · 동결분만"]
+    COL["Trusted Collector<br/>독립 수집 → freeze"]
   end
 
   subgraph ZA["Zone A · 에이전트 영역 · LLM"]
     direction TB
     LEAD["main · recovery_lead"]
-    S1["sub1 · spec_researcher"]
-    S2["sub2 · runtime_diagnostician"]
-    S3["sub3 · repair_engineer"]
-    S4["sub4 · data_auditor"]
+    S1["spec_researcher"]
+    S2["runtime_diagnostician"]
+    S3["repair_engineer"]
+    S4["data_auditor"]
+    LEAD <--> S1
+    LEAD <--> S2
+    LEAD <--> S3
+    LEAD <--> S4
   end
 
   subgraph ZS["Zone S · 실행 영역 · 네트워크 없음"]
-    SBX["Sandbox Backend<br/>OpenShell 우선 · Container 대안"]
+    SBX["Sandbox Backend"]
     CAND["candidate.py<br/>fetch_records"]
+    SBX --> CAND
   end
 
-  CLI -->|명령·파일경로| ORCH
-  ORCH --> REG
-  ORCH --> BUD
+  CLI -->|명령 · 파일경로| ORCH
+  ORCH -->|task envelope| LEAD
   ORCH --> VER
   ORCH --> EVT
-  ORCH -->|task envelope| LEAD
-  LEAD -->|delegate| S1 & S2 & S3 & S4
-  S1 & S2 & S3 & S4 -->|structured return| LEAD
-  LEAD & S1 & S2 & S3 & S4 -->|tool call| TG
+
+  ZA ==>|도구 호출 9종| TG
+  ZA -.->|모든 추론| MG
+
   TG --> BUD
-  TG --> BRK
   TG --> EVT
-  TG --> SBX
-  LEAD & S1 & S2 & S3 & S4 -.->|모든 추론| MG
+  TG --> BRK
+  TG ==> SBX
   MG --> BUD
   COL -->|snapshot freeze| BRK
-  SBX --> CAND
-  CAND <-->|JSONL IPC · 요청/응답만| BRK
-  VER -.->|기대값 · 읽기 전용| REG
+  CAND <-->|JSONL IPC| BRK
+  VER -.->|읽기 전용| REG
   ORCH --> CLI
+
+  classDef trusted fill:#eef4ff,stroke:#5b7fbd
+  classDef agent fill:#fff6e8,stroke:#c99a4e
+  classDef exec fill:#ffeeee,stroke:#c07272
+  class ORCH,TG,MG,BUD,VER,REG,EVT,BRK,COL trusted
+  class LEAD,S1,S2,S3,S4 agent
+  class SBX,CAND exec
 ```
 
 ### 2.1 경계별 차단 규칙

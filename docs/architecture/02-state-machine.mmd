@@ -1,0 +1,26 @@
+stateDiagram-v2
+  [*] --> prepare
+  prepare --> terminal_early : INVALID_INPUT · PERMISSION_DENIED · BUSY · RUNTIME_UNAVAILABLE
+  prepare --> baseline : 입력·권한·backend 자가검사 통과
+
+  baseline --> verified_unchanged : 고정 검증 통과 · 모델 호출 0회
+  baseline --> terminal_early : 인증만료 · 한도소진 · 제공기관 장애
+  baseline --> delegating : 결함 확인
+
+  delegating --> delegating : main 의 delegate / revise_plan
+  delegating --> checking : request_finish
+  delegating --> finalizing : request_stop · 예산소진 · Ctrl-C · 루프상한
+
+  checking --> delegating : 게이트 거절 · 여유 있음
+  checking --> finalizing : 게이트 통과 또는 재시도 불가
+
+  finalizing --> [*]
+  verified_unchanged --> [*]
+  terminal_early --> [*]
+
+  note right of checking
+    finish gate 는 우회 불가.
+    main 의 정상 종료 · 텍스트 종료 ·
+    agent 예외 · 루프 상한 전부
+    같은 게이트로 수렴한다.
+  end note

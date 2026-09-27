@@ -1,0 +1,61 @@
+flowchart TB
+  subgraph ZU["Zone U · 사용자"]
+    CLI["api-doctor CLI<br/>OS user: operator"]
+  end
+
+  subgraph ZT["Zone T · 신뢰 영역 · LLM 없음"]
+    direction LR
+    ORCH["LangGraph Runtime<br/>stage · 취소 · 중단"]
+    TG["Tool Gateway<br/>역할 인가 · hash · 가시성"]
+    MG["Model Gateway<br/>LLM 호출 단일 통로"]
+    BUD["Budget Gateway<br/>호출 · 토큰 · 시간 원장"]
+    VER["Fixed Verifier<br/>최종 판정"]
+    REG["Registry<br/>contract · probe · 기대값"]
+    EVT["Event Store<br/>events.jsonl · manifest"]
+    BRK["Data Broker<br/>API key 보유 · 동결분만"]
+    COL["Trusted Collector<br/>독립 수집 → freeze"]
+  end
+
+  subgraph ZA["Zone A · 에이전트 영역 · LLM"]
+    direction TB
+    LEAD["main · recovery_lead"]
+    S1["spec_researcher"]
+    S2["runtime_diagnostician"]
+    S3["repair_engineer"]
+    S4["data_auditor"]
+    LEAD <--> S1
+    LEAD <--> S2
+    LEAD <--> S3
+    LEAD <--> S4
+  end
+
+  subgraph ZS["Zone S · 실행 영역 · 네트워크 없음"]
+    SBX["Sandbox Backend"]
+    CAND["candidate.py<br/>fetch_records"]
+    SBX --> CAND
+  end
+
+  CLI -->|명령 · 파일경로| ORCH
+  ORCH -->|task envelope| LEAD
+  ORCH --> VER
+  ORCH --> EVT
+
+  ZA ==>|도구 호출 9종| TG
+  ZA -.->|모든 추론| MG
+
+  TG --> BUD
+  TG --> EVT
+  TG --> BRK
+  TG ==> SBX
+  MG --> BUD
+  COL -->|snapshot freeze| BRK
+  CAND <-->|JSONL IPC| BRK
+  VER -.->|읽기 전용| REG
+  ORCH --> CLI
+
+  classDef trusted fill:#eef4ff,stroke:#5b7fbd
+  classDef agent fill:#fff6e8,stroke:#c99a4e
+  classDef exec fill:#ffeeee,stroke:#c07272
+  class ORCH,TG,MG,BUD,VER,REG,EVT,BRK,COL trusted
+  class LEAD,S1,S2,S3,S4 agent
+  class SBX,CAND exec

@@ -1,0 +1,8 @@
+flowchart LR
+  CT["contract_hash"] --> CK["check_id"]
+  SN["snapshot_hash"] --> CK
+  CH["candidate_hash"] --> CK
+  CK --> GT["finish gate"]
+  CH --> AU["audit_findings"]
+  AU --> GT
+  GT --> ST["final status"]

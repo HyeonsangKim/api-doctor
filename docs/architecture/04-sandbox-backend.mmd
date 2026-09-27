@@ -1,0 +1,9 @@
+flowchart LR
+  REQ["후보 실행 요청"] --> SEL{backend 선택}
+  SEL -->|Linux + 설치됨| OS["OpenShellBackend<br/>policy hash 고정"]
+  SEL -->|그 외| CT["ContainerBackend<br/>docker · fixture 전용"]
+  OS --> ST["boundary_selftest<br/>동일 검사 세트"]
+  CT --> ST
+  ST -->|하나라도 실패| REJ["RUNTIME_UNAVAILABLE<br/>호스트 실행 없음"]
+  ST -->|전부 통과| RUN["candidate 실행"]
+  RUN --> DEN["denials.jsonl<br/>backend_id 필수 기록"]
