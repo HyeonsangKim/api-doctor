@@ -46,13 +46,69 @@ def test_finishing_a_delegation_does_not_reset_budget() -> None:
 
 
 def test_finish_slot_cannot_be_consumed_by_normal_runs() -> None:
-    """종료 검증용 실행 1회는 양도 불가다 (PRD §4.1)."""
-    ledger = BudgetLedger(limits=Limits(sandbox_runs=3))
+    """종료 검증용 실행 1회는 양도 불가다 (PRD §4.1).
+
+    감사 예비분은 이 테스트의 관심사가 아니므로 0 으로 두고 분리해서 본다.
+    """
+    ledger = BudgetLedger(
+        limits=Limits(sandbox_runs=3, sandbox_runs_reserved_for_audit=0)
+    )
     ledger.spend_sandbox_run()
     ledger.spend_sandbox_run()
     assert ledger.usable_sandbox_runs == 0
     assert ledger.can_run_sandbox().reason is DenyReason.SANDBOX_EXHAUSTED
     assert ledger.can_run_sandbox(is_finish=True), "종료 검증은 예약분을 쓴다"
+
+
+def test_auditor_keeps_its_own_candidate_runs() -> None:
+    """수리자가 자기 패치를 다시 돌려 보다 감사 몫을 먹으면 안 된다.
+
+    실측(2026-09-28): 고정 검증 4/4 를 통과한 수리본이 있었는데
+    repair_engineer 가 패치 제출 뒤 세 번 더 돌려 샌드박스 8/8 을 소진했고,
+    감사자는 probe 를 한 번도 못 돌려 MISSING_AUDIT 으로 끝났다.
+    """
+    limits = Limits(sandbox_runs=8, sandbox_runs_reserved_for_audit=2)
+    ledger = BudgetLedger(limits=limits)
+    # 종료 검증용 1 + 감사용 2 를 빼면 조사·수리 몫은 5 다.
+    for _ in range(5):
+        ledger.spend_sandbox_run()
+
+    assert not ledger.can_run_sandbox(agent_id="repair_engineer")
+    assert not ledger.can_run_sandbox(agent_id="runtime_diagnostician")
+    assert ledger.can_run_sandbox(agent_id="data_auditor"), (
+        "감사자가 자기 예비분을 못 쓰면 예약한 의미가 없다"
+    )
+
+    ledger.spend_sandbox_run(agent_id="data_auditor")
+    ledger.spend_sandbox_run(agent_id="data_auditor")
+    assert not ledger.can_run_sandbox(agent_id="data_auditor"), (
+        "예비분을 다 쓰면 감사자도 멈춘다"
+    )
+    assert ledger.can_run_sandbox(is_finish=True), "종료 검증 몫은 그래도 남는다"
+
+
+def test_audit_reserve_covers_every_risk_area_of_the_shipped_contract() -> None:
+    """예비분이 계약의 위험 영역을 실제로 덮을 수 있어야 한다.
+
+    숫자를 감으로 정하면 감사가 probe 하나를 못 돌려 MISSING_AUDIT 이 난다.
+    """
+    import pathlib
+
+    from api_doctor.registry.loader import load_dataset
+
+    ds = load_dataset(pathlib.Path("registry/datasets/seoul_library"))
+    risks = {r.risk_id for r in ds.contract.audit_requirements}
+
+    # 각 위험 영역을 덮는 probe 중 가장 비싼 것을 골라도 들어가야 한다.
+    worst = 0
+    for risk in risks:
+        costs = [len(pr.runs) for pr in ds.probes.probes if risk in (pr.covers or ())]
+        assert costs, f"{risk} 를 덮는 probe 가 없다"
+        worst += max(costs)
+
+    assert Limits().sandbox_runs_reserved_for_audit >= worst, (
+        f"위험 영역 {sorted(risks)} 를 덮으려면 최소 {worst}회가 필요하다"
+    )
 
 
 def test_finish_slot_can_be_rereserved_without_raising_total() -> None:

@@ -30,6 +30,8 @@ AGENT_IDS = (
 SINGLE_AGENT = "single_agent"
 #: 실패 예비분을 쓸 수 있는 후반 역할. 여기까지 왔으면 끝을 봐야 한다.
 _REPAIR_STAGES = frozenset({"repair_engineer", "data_auditor", SINGLE_AGENT})
+#: 감사 역할. 감사 전용 예비분은 이 역할만 쓸 수 있다.
+AUDIT_AGENT = "data_auditor"
 
 
 class Resource(StrEnum):
@@ -139,7 +141,15 @@ class Limits:
     model_calls: int = 32
     tokens: int = 192_000
     wall_seconds: float = 600.0
-    sandbox_runs: int = 8
+    # 실측(2026-09-28) 후 조정. 8 로는 감사가 굶었다.
+    #
+    # 한 바퀴에 필요한 최소:
+    #   baseline 1 + 진단 probe 2 + 수리 확인 1 + 감사 3 + 종료 검증 1 = 8
+    # 여기에 PRD 가 허용하는 두 번째 패치 시도분을 더해 12 로 둔다.
+    #
+    # 후보 실행은 동결 스냅샷을 읽는 로컬 컨테이너라 공급자 비용이 없다.
+    # 실질 비용은 시간이며 그것은 wall_seconds 가 지킨다.
+    sandbox_runs: int = 12
     broker_calls: int = 20
     delegations: int = 8
     patches: int = 2
@@ -178,6 +188,21 @@ class Limits:
     #: 실패했을 때 재시도할 여지가 남아 있지 않았다. 고칠 단계에 도달하고도
     #: 한 번을 못 돌아보는 것이 가장 비싼 낭비다.
     provider_failures_reserved_for_repair: int = 8
+    #: data_auditor 전용으로 남겨 두는 후보 실행 횟수.
+    #:
+    #: 실측(2026-09-28): 수리가 성공해 고정 검증 4/4 를 통과했는데도
+    #: repair_engineer 가 패치 제출 뒤 자기 패치를 세 번 다시 돌려 보느라
+    #: 샌드박스 8/8 이 소진됐고, 감사자는 probe 를 한 번도 못 돌려
+    #: MISSING_AUDIT 으로 끝났다. 고쳐 놓고 인정받지 못하는 가장 비싼 낭비다.
+    #:
+    #: 감사는 계약의 위험 영역마다 probe 를 돌려야 한다. seoul_library 는
+    #: 위험 영역이 둘이고, 그것을 덮는 probe 의 실행 수는 다음과 같다.
+    #:
+    #:   pagination_boundary : page_partition 2회 (또는 range_coverage 1회)
+    #:   mapping_preservation: field_presence  1회
+    #:
+    #: 감사자가 더 유용한 page_partition 을 고를 수 있어야 하므로 3회다.
+    sandbox_runs_reserved_for_audit: int = 3
 
 
 @dataclass(slots=True)
@@ -251,7 +276,18 @@ class BudgetLedger:
 
     @property
     def usable_sandbox_runs(self) -> int:
+        """감사 예비분까지 뺀, 조사·수리가 쓸 수 있는 실행 횟수."""
+        return self.usable_sandbox_runs_for("repair_engineer")
+
+    def usable_sandbox_runs_for(self, agent_id: str) -> int:
+        """이 역할이 지금 쓸 수 있는 후보 실행 횟수.
+
+        감사자만 예비분에 손댈 수 있다. 수리자가 자기 패치를 다시 돌려 보다
+        감사 몫을 먹으면, 고쳐 놓고도 감사 미완료로 끝난다.
+        """
         reserved = 1 if self.finish_slot_reserved else 0
+        if agent_id != AUDIT_AGENT:
+            reserved += self.limits.sandbox_runs_reserved_for_audit
         return max(0, self.limits.sandbox_runs - self.sandbox_runs - reserved)
 
     def remaining(self) -> dict[str, Any]:
@@ -329,20 +365,30 @@ class BudgetLedger:
             )
         return self.can_spend_model_call(agent_id)
 
-    def can_run_sandbox(self, *, is_finish: bool = False) -> Verdict:
+    def can_run_sandbox(
+        self, *, is_finish: bool = False, agent_id: str = "repair_engineer"
+    ) -> Verdict:
         base = self._preconditions()
         if base is not None:
             return base
         available = (
             self.limits.sandbox_runs - self.sandbox_runs
             if is_finish
-            else self.usable_sandbox_runs
+            else self.usable_sandbox_runs_for(agent_id)
         )
         if available <= 0:
+            note = ""
+            if not is_finish:
+                note = " (종료 검증용 1회는 양도 불가"
+                if agent_id != AUDIT_AGENT:
+                    note += (
+                        f", 감사용 {self.limits.sandbox_runs_reserved_for_audit}회는 "
+                        "data_auditor 전용"
+                    )
+                note += ")"
             return Verdict(
                 False, DenyReason.SANDBOX_EXHAUSTED,
-                f"후보 실행 {self.sandbox_runs}/{self.limits.sandbox_runs}"
-                + ("" if is_finish else " (종료 검증용 1회는 양도 불가)"),
+                f"후보 실행 {self.sandbox_runs}/{self.limits.sandbox_runs}" + note,
             )
         return ALLOW
 
@@ -468,8 +514,12 @@ class BudgetLedger:
         self.role_delegations[agent_id] = self.role_delegations.get(agent_id, 0) + 1
         self._log("spend", Resource.DELEGATIONS, agent_id=agent_id)
 
-    def spend_sandbox_run(self, *, is_finish: bool = False) -> None:
-        verdict = self.can_run_sandbox(is_finish=is_finish)
+    def spend_sandbox_run(
+        self, *, is_finish: bool = False, agent_id: str = "repair_engineer"
+    ) -> None:
+        # 검사 경로와 소비 경로가 같은 상태를 봐야 한다. 한쪽만 역할을 알면
+        # 도구는 허용했는데 원장이 거절하는 어긋남이 생긴다.
+        verdict = self.can_run_sandbox(is_finish=is_finish, agent_id=agent_id)
         if not verdict:
             raise BudgetExceeded(verdict)
         self.sandbox_runs += 1

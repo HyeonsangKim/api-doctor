@@ -114,14 +114,19 @@ class RunSession:
     # ------------------------------------------------------------- 실행
 
     def execute_candidate(
-        self, candidate_hash: str, query: dict[str, Any], *, is_finish: bool = False
+        self,
+        candidate_hash: str,
+        query: dict[str, Any],
+        *,
+        is_finish: bool = False,
+        agent_id: str = "repair_engineer",
     ) -> tuple[list[dict[str, Any]] | None, str | None, set[int], int, int]:
         """후보 1회 실행. 예산을 차감하고 denial 을 수집한다."""
         candidate = self.candidates.get(candidate_hash)
         if candidate is None:
             raise KeyError(f"등록되지 않은 후보입니다: {candidate_hash}")
 
-        self.ledger.spend_sandbox_run(is_finish=is_finish)
+        self.ledger.spend_sandbox_run(is_finish=is_finish, agent_id=agent_id)
         # PRD §4.1 의 "공식 데이터 호출 20회" 는 **공급자에게 나가는 호출**의
         # 상한이다. fixture 는 동결분만 읽으므로 그 상한을 적용하지 않는다.
         # 적용하면 앞선 probe 들이 상한을 먹어 가장 중요한 **종료 검증이 굶는다**
@@ -156,18 +161,22 @@ class RunSession:
             broker.call_count, outcome.duration_ms,
         )
 
-    def probe_runner_for(self, candidate_hash: str) -> ProbeRunner:
+    def probe_runner_for(
+        self, candidate_hash: str, *, agent_id: str = "repair_engineer"
+    ) -> ProbeRunner:
         def execute(query: dict[str, Any]):
-            return self.execute_candidate(candidate_hash, query)
+            return self.execute_candidate(candidate_hash, query, agent_id=agent_id)
 
         return ProbeRunner(self.dataset.contract, execute)
 
-    def run_probe(self, probe_id: str, candidate_hash: str) -> ProbeResult:
+    def run_probe(
+        self, probe_id: str, candidate_hash: str, *, agent_id: str = "repair_engineer"
+    ) -> ProbeResult:
         probe: Probe | None = self.dataset.probes.get(probe_id)
         if probe is None:
             raise UnsupportedProbe(f"등록되지 않은 probe 입니다: {probe_id}")
 
-        result = self.probe_runner_for(candidate_hash).run(
+        result = self.probe_runner_for(candidate_hash, agent_id=agent_id).run(
             probe, candidate_hash=candidate_hash,
             snapshot_hash=self.snapshot.snapshot_hash,
         )

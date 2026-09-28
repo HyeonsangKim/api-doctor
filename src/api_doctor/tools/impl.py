@@ -223,12 +223,14 @@ def _run_probe(session: RunSession):
         if probe is None:
             raise ToolError("UNSUPPORTED_PROBE", f"등록되지 않은 probe: {probe_id}")
 
-        verdict = session.ledger.can_run_sandbox()
+        verdict = session.ledger.can_run_sandbox(agent_id=context.agent_id)
         if not verdict:
             raise ToolError("BUDGET_EXHAUSTED", verdict.detail)
 
         try:
-            result = session.run_probe(probe_id, context.candidate_hash)
+            result = session.run_probe(
+                probe_id, context.candidate_hash, agent_id=context.agent_id
+            )
         except UnsupportedProbe as exc:
             raise ToolError("UNSUPPORTED_PROBE", str(exc)) from exc
         except BudgetExceeded as exc:
