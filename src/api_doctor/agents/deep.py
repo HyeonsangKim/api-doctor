@@ -238,6 +238,9 @@ def build_team(
             create_deep_agent,
         )
         from deepagents._models import get_model_provider
+        from deepagents.middleware.summarization import (
+            _DeepAgentsSummarizationMiddleware,
+        )
         from deepagents.profiles import register_harness_profile
     except ImportError as exc:  # pragma: no cover - 선택 의존성
         raise HarnessUnavailable(
@@ -246,11 +249,19 @@ def build_team(
 
     lead_model = for_agent(model, "main")
 
-    # 기본 general-purpose 하위 에이전트를 끈다.
+    # 기본 general-purpose 하위 에이전트와 **자동 요약**을 끈다.
+    #
+    # PRD §4.1: "P0 에서는 자동 요약·암묵적 재시도를 끄고 필요한 재시도를
+    # 계측한다." deepagents 는 기본 스택에 SummarizationMiddleware 를 넣고
+    # **main 의 모델로** 요약을 돌린다. 켜 두면 실측에서 본 것처럼 위임 2건에
+    # main 호출 8회가 나가고, 그 호출이 무엇을 위한 것인지 원장에서 구분되지
+    # 않는다. FilesystemMiddleware·SubAgentMiddleware 와 달리 이것은 필수
+    # scaffolding 이 아니라 제외할 수 있다.
     register_harness_profile(
         get_model_provider(lead_model) or "api-doctor-gateway",
         HarnessProfile(
-            general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=False)
+            general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=False),
+            excluded_middleware=[_DeepAgentsSummarizationMiddleware],
         ),
     )
 
