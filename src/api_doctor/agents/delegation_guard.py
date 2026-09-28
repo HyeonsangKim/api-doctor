@@ -84,6 +84,7 @@ class DelegationGuard(AgentMiddleware):
         current_hash: Callable[[], str],
         inventory: dict[str, list[str]],
         tool_log: list[dict[str, Any]] | None = None,
+        audit_gap: Callable[[], str | None] | None = None,
     ) -> None:
         super().__init__()
         self._tool_log = tool_log
@@ -92,6 +93,9 @@ class DelegationGuard(AgentMiddleware):
         self._targets = set(targets)
         self._current_hash = current_hash
         self._inventory = inventory
+        # 현재 후보에서 감사만 비어 있으면 그 사유를 돌려주는 콜백.
+        # 판단은 종료 게이트와 같은 함수가 한다 — 여기서 따로 세지 않는다.
+        self._audit_gap = audit_gap
         self.state = LeadState()
         self.records: list[DelegationRecord] = []
 
@@ -202,6 +206,27 @@ class DelegationGuard(AgentMiddleware):
                 f"{answered[-1].returned[:200]}\n"
                 "같은 질문을 다시 하지 말고 다음 단계로 넘어가세요.",
             )
+
+        # 고쳐 놓고 감사만 비어 있으면, 감사 말고는 성공으로 가는 길이 없다.
+        #
+        # 실측(2026-09-28): 완료된 7건 중 감사가 위임된 것은 1건뿐이었다.
+        # main 은 수리를 반복해서 다시 부르다 막히고 끝났다. 감사 없이는
+        # 설계상 verified_repaired 가 불가능하므로 그 시간은 전부 버려진다.
+        if agent_id != self.AUDIT and self._audit_gap is not None:
+            gap = self._audit_gap()
+            if gap:
+                self._events.append(
+                    EventType.DELEGATION_REJECTED,
+                    f"{agent_id} 대신 감사가 필요합니다.",
+                    reason="AUDIT_IS_THE_ONLY_GAP", agent_id=agent_id,
+                )
+                return (
+                    "AUDIT_IS_THE_ONLY_GAP",
+                    "현재 후보는 고정 검증을 통과했고 남은 것은 감사뿐입니다: "
+                    f"{gap}\n"
+                    f"{agent_id} 를 불러도 성공에 가까워지지 않습니다. "
+                    "지금 data_auditor 에게 위임하세요.",
+                )
 
         # 감사만 남았으면 감사 몫을 따로 지킨다. 수리 재시도가 이것을
         # 먹으면 고쳐 놓고도 감사를 못 해 inconclusive 로 끝난다 —

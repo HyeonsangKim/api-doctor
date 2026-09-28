@@ -461,3 +461,61 @@ def test_repair_prompt_warns_against_non_ascii_in_code() -> None:
     repair = BY_AGENT_DEEP["repair_engineer"]
     assert "ASCII" in repair, "코드에 ASCII 만 쓰라는 지침이 없다"
     assert "·" in repair, "무엇이 문제인지 실제 글자로 보여줘야 한다"
+
+
+def test_only_audit_is_allowed_once_it_is_the_last_gap(tmp_path) -> None:
+    """고정 검증을 통과했고 감사만 비어 있으면 감사 외 위임을 막는다.
+
+    실측(2026-09-28): 완료된 7건 중 감사가 위임된 것은 1건뿐이었다.
+    main 은 수리를 반복해서 다시 부르다 막히고 끝났다. 감사 없이는
+    설계상 verified_repaired 가 불가능하므로 그 시간은 전부 버려진다.
+    """
+    from api_doctor.agents.delegation_guard import DelegationGuard
+    from api_doctor.runtime.budget import BudgetLedger
+    from api_doctor.runtime.events import EventStore
+
+    guard = DelegationGuard(
+        ledger=BudgetLedger(), events=EventStore(tmp_path),
+        targets=("spec_researcher", "runtime_diagnostician",
+                 "repair_engineer", "data_auditor"),
+        current_hash=lambda: "sha256:v2",
+        inventory={},
+        audit_gap=lambda: "감사 기록이 없는 위험 영역: ['pagination_boundary']",
+    )
+
+    for role in ("repair_engineer", "runtime_diagnostician", "spec_researcher"):
+        refusal = guard._check(role, "한 번 더 봐 줘")
+        assert refusal is not None, f"{role} 위임이 통과했다"
+        assert refusal[0] == "AUDIT_IS_THE_ONLY_GAP"
+        assert "data_auditor" in refusal[1], "무엇을 하라고 알려줘야 한다"
+
+    assert guard._check("data_auditor", "감사해 줘") is None, "감사까지 막으면 안 된다"
+
+
+def test_repair_is_still_allowed_while_verification_fails(tmp_path) -> None:
+    """검증이 실패한 상태의 재수리는 PRD §5.3.3 개발 루프가 허용한다."""
+    from api_doctor.agents.delegation_guard import DelegationGuard
+    from api_doctor.runtime.budget import BudgetLedger
+    from api_doctor.runtime.events import EventStore
+
+    guard = DelegationGuard(
+        ledger=BudgetLedger(), events=EventStore(tmp_path),
+        targets=("spec_researcher", "runtime_diagnostician",
+                 "repair_engineer", "data_auditor"),
+        current_hash=lambda: "sha256:v2",
+        inventory={},
+        audit_gap=lambda: None,   # 검증이 아직 통과하지 못했다
+    )
+    assert guard._check("repair_engineer", "다시 고쳐 줘") is None
+
+
+def test_guard_asks_the_gate_rather_than_counting_audits_itself() -> None:
+    """가드가 따로 세면 게이트와 어긋나 엉뚱한 곳에서 막힌다."""
+    import inspect
+
+    from api_doctor.agents import deep
+
+    source = inspect.getsource(deep)
+    assert "audit_completeness(session" in source, (
+        "가드의 감사 판단이 종료 게이트와 같은 함수를 써야 한다"
+    )

@@ -36,6 +36,7 @@ from pydantic import BaseModel, create_model
 from ..model.chat import for_agent
 from ..model.gateway import ModelGateway
 from ..runtime.envelope import _AUDIT_PROBES, build_context, build_envelope
+from ..runtime.gate import audit_completeness
 from ..runtime.evidence import AUDIT
 from ..runtime.session import RunSession
 from ..tools.gateway import TOOL_ACL, Tool, ToolContext, ToolError, ToolGateway
@@ -303,12 +304,32 @@ def build_team(
     inventory_preview = {
         sub["name"]: sorted(t.name for t in sub["tools"]) for sub in subagents
     }
+    def _audit_gap() -> str | None:
+        """현재 후보가 고정 검증을 통과했는데 감사만 비어 있는가.
+
+        판단은 종료 게이트가 쓰는 `audit_completeness` 를 그대로 쓴다.
+        가드가 따로 세면 게이트와 어긋나 엉뚱한 곳에서 막힌다.
+
+        고정 검증이 실패한 상태에서는 막지 않는다. 그때의 재진단·재수리는
+        PRD §5.3.3 의 개발 루프가 허용하는 정당한 행동이다.
+        """
+        candidate_hash = session.current_hash
+        verdict = session.final_verdict
+        if verdict is None or not verdict.passed:
+            return None
+        if verdict.candidate_hash != candidate_hash:
+            # 검증이 낡은 후보의 것이면 지금 상태를 말해 주지 못한다.
+            return None
+        audit = audit_completeness(session, candidate_hash)
+        return None if audit.complete else audit.reason
+
     guard = DelegationGuard(
         ledger=session.ledger, events=session.events,
         targets=DELEGATION_TARGETS,
         current_hash=lambda: session.current_hash,
         inventory=inventory_preview,
         tool_log=gateway.call_log_ref,
+        audit_gap=_audit_gap,
     )
 
     agent = create_deep_agent(
