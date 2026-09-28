@@ -131,3 +131,35 @@ def test_usage_reports_per_role_for_profiler_reconciliation() -> None:
     usage = ledger.usage()
     assert usage["per_role_calls"]["main"] == 2
     assert sum(usage["per_role_calls"].values()) == usage["model_calls"] == 3
+
+
+def test_repair_keeps_a_share_of_the_provider_failure_allowance() -> None:
+    """조사 역할이 실패 허용량을 다 태워도 수리자는 재시도할 수 있다.
+
+    실측(2026-09-28): 429 가 27회 나 전역 25회를 넘겼고, 그 시점에
+    repair_engineer 는 아직 한 번도 성공하지 못한 상태였다. 고칠 단계에
+    도달하고도 한 번을 못 돌아보는 것이 가장 비싼 낭비다.
+    """
+    limits = Limits()
+    ledger = BudgetLedger(limits=limits)
+    investigation = limits.max_provider_failures - limits.provider_failures_reserved_for_repair
+    ledger.failed_attempts = investigation
+
+    assert ledger.provider_failures_exhausted_for("spec_researcher")
+    assert ledger.provider_failures_exhausted_for("runtime_diagnostician")
+    assert not ledger.provider_failures_exhausted_for("repair_engineer")
+    assert not ledger.provider_failures_exhausted_for("data_auditor")
+
+    ledger.failed_attempts = limits.max_provider_failures
+    assert ledger.provider_failures_exhausted_for("repair_engineer"), (
+        "예비분까지 다 쓰면 수리자도 멈춰야 한다"
+    )
+    assert ledger.provider_failures_exhausted
+
+
+def test_single_agent_control_arm_gets_the_whole_failure_allowance() -> None:
+    """비교 실험 B 는 역할 분리가 없으므로 예비분을 나눌 상대가 없다 (PRD §7.3)."""
+    limits = Limits()
+    ledger = BudgetLedger(limits=limits)
+    ledger.failed_attempts = limits.max_provider_failures - 1
+    assert not ledger.provider_failures_exhausted_for("single_agent")

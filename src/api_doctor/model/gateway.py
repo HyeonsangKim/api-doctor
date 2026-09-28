@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator, Protocol
@@ -24,7 +25,24 @@ NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 # 끝내 실패해 파이프라인 단계가 통째로 날아간다. 실행이 100~300초이고
 # 시간 예산이 600초라 여유가 있다.
 MAX_TRANSIENT_RETRIES = 5
+#: 호출 사이 최소 간격. 무료 등급의 초당 요청 한도를 넘지 않기 위한 것이다.
+MIN_CALL_INTERVAL = 1.5
+#: 429 가 반복될 때 간격 상한.
+MAX_CALL_INTERVAL = 20.0
+#: 이만큼 연속 성공하면 간격을 줄여 본다.
+REWARD_STREAK = 4
 DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b"
+#: 주 모델이 과부하일 때 대신 쓸 모델.
+#:
+#: 실측(2026-09-28, 무료 등급, 각 8회):
+#:   nemotron-3-super-120b-a12b            1/8  (429×4, 503×3)
+#:   nemotron-3-nano-omni-30b-a3b-reasoning 4/8 (503×4)
+#:   llama-3.1-nemotron 계열 3종            0/8  (404 — 목록엔 있으나 호출 불가)
+#:
+#: 503 "Service temporarily overloaded" 는 우리가 만든 부하가 아니므로
+#: 간격을 벌려도 줄지 않는다. 다른 모델로 넘어가는 것만이 답이다.
+#: 어떤 모델이 응답했는지는 호출마다 기록한다 — 그러지 않으면 측정이 거짓말이 된다.
+DEFAULT_FALLBACK_MODELS = ("nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",)
 
 
 class ModelUnavailable(RuntimeError):
@@ -34,6 +52,7 @@ class ModelUnavailable(RuntimeError):
 @dataclass(frozen=True, slots=True)
 class ModelConfig:
     model: str = DEFAULT_MODEL
+    fallback_models: tuple[str, ...] = DEFAULT_FALLBACK_MODELS
     base_url: str = NVIDIA_BASE_URL
     temperature: float = 0.0
     timeout_seconds: float = 45.0
@@ -52,6 +71,8 @@ class ModelCall:
     output_tokens: int | None
     latency_ms: int
     tokens_kind: str
+    #: 실제로 응답한 모델. 폴백이 쓰였으면 주 모델과 다르다.
+    model: str = ""
     # 추론 모델의 관측용. 예산은 completion_tokens 로 정산한다.
     reasoning_chars: int = 0
     finish_reason: str = ""
@@ -70,6 +91,7 @@ class ModelCall:
     def to_json(self) -> dict[str, Any]:
         return {
             "agent_id": self.agent_id,
+            "model": self.model,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
             "total_tokens": self.total_tokens,
@@ -87,10 +109,23 @@ class ModelCall:
 class ChatBackend(Protocol):
     """게이트웨이가 감싸는 실제 모델 클라이언트."""
 
+    #: 공급자에게 실제 요청이 나가는가. 레이트리밋은 여기에만 걸린다 —
+    #: scripted backend 까지 재우면 테스트가 느려질 뿐 아무것도 지키지 못한다.
+    is_remote: bool
+
     def complete(
-        self, messages: list[dict[str, Any]], *, max_tokens: int, timeout: float
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        max_tokens: int,
+        timeout: float,
+        model: str | None = None,
     ) -> tuple[str, dict[str, int] | None]:
-        """(본문, usage) 를 반환한다. usage 가 없으면 None."""
+        """(본문, usage) 를 반환한다. usage 가 없으면 None.
+
+        `model` 이 주어지면 그 모델로 부른다 — 주 모델이 과부하일 때
+        게이트웨이가 폴백 모델을 지정한다.
+        """
         ...
 
 
@@ -105,6 +140,87 @@ def estimate_tokens(messages: list[dict[str, Any]]) -> int:
     return max(1, chars // 2) + 8 * len(messages)
 
 
+class RateLimiter:
+    """호출 사이에 최소 간격을 둔다 — 429 를 맞고 물러서는 대신 안 맞는다.
+
+    실측에서 429 가 시도의 73% 였다. 그건 공급자 장애가 아니라 우리가
+    무료 등급의 초당 요청 한도를 넘긴 것이다. 맞고 나서 backoff 하면
+    이미 전역 실패 허용량을 태운 뒤라 뒤에 오는 역할(수리자)이 굶는다.
+
+    간격은 적응적이다. 429 를 맞으면 늘리고, 연속 성공하면 천천히 줄인다.
+    게이트웨이 하나가 모든 역할의 호출을 통과시키므로 이 한 곳이면 된다.
+    """
+
+    __slots__ = ("_interval", "_last", "_streak", "_min", "_max", "_now")
+
+    def __init__(
+        self,
+        *,
+        initial: float = MIN_CALL_INTERVAL,
+        minimum: float = MIN_CALL_INTERVAL,
+        maximum: float = MAX_CALL_INTERVAL,
+        now: Callable[[], float] | None = None,
+    ) -> None:
+        self._interval = initial
+        self._min = minimum
+        self._max = maximum
+        self._last: float | None = None
+        self._streak = 0
+        self._now = now or time.monotonic
+
+    @classmethod
+    def unpaced(cls) -> "RateLimiter":
+        """간격을 두지 않는다. 공급자에게 나가지 않는 backend 용."""
+        return cls(initial=0.0, minimum=0.0, maximum=0.0)
+
+    @property
+    def interval(self) -> float:
+        return self._interval
+
+    def due(self) -> float:
+        """지금 부르기 전에 기다려야 할 초. 기다림 자체는 호출자가 한다.
+
+        게이트웨이는 취소 토큰으로 기다려야 하므로 여기서 자지 않는다.
+        """
+        if self._last is None:
+            return 0.0
+        return max(0.0, self._interval - (self._now() - self._last))
+
+    def mark(self) -> None:
+        """호출을 보냈다고 기록한다."""
+        self._last = self._now()
+
+    def penalize(self, retry_after: float | None = None) -> float:
+        """429 를 맞았다. 간격을 늘리고 물러설 시간을 돌려준다."""
+        self._streak = 0
+        self._interval = min(self._max, max(self._interval * 2.0, self._min * 2.0))
+        # 공급자가 명시한 Retry-After 가 우리 추정보다 우선한다.
+        return max(self._interval, retry_after or 0.0)
+
+    def reward(self) -> None:
+        """연속 성공이 쌓이면 조심스럽게 간격을 줄인다."""
+        self._streak += 1
+        if self._streak >= REWARD_STREAK:
+            self._streak = 0
+            self._interval = max(self._min, self._interval * 0.75)
+
+
+def parse_retry_after(error: str) -> float | None:
+    """오류 문자열에 실린 Retry-After 초를 읽는다."""
+    m = re.search(r"retry[- ]after[\"'\s:=]+(\d+(?:\.\d+)?)", error, re.IGNORECASE)
+    if m is None:
+        return None
+    try:
+        return min(float(m.group(1)), MAX_CALL_INTERVAL)
+    except ValueError:
+        return None
+
+
+def is_rate_limited(error: str) -> bool:
+    """공급자 장애가 아니라 우리가 너무 빨리 부른 경우인가."""
+    return "429" in error or "too many requests" in error.lower()
+
+
 @dataclass(slots=True)
 class ModelGateway:
     """예산을 강제하며 모델을 호출한다."""
@@ -114,6 +230,15 @@ class ModelGateway:
     config: ModelConfig = field(default_factory=ModelConfig)
     calls: list[ModelCall] = field(default_factory=list)
     on_call: Callable[[ModelCall], None] | None = None
+    limiter: RateLimiter | None = None
+
+    def __post_init__(self) -> None:
+        if self.limiter is None:
+            self.limiter = (
+                RateLimiter()
+                if getattr(self.backend, "is_remote", False)
+                else RateLimiter.unpaced()
+            )
 
     def complete(
         self,
@@ -129,42 +254,77 @@ class ModelGateway:
         """
         self.ledger.cancel.raise_if_cancelled()
 
-        text, error = self._attempt(agent_id, messages, retry_of=None)
+        self._pace()
+        model = self.config.model
+        text, error = self._attempt(agent_id, messages, retry_of=None, model=model)
         if error is None:
+            self.limiter.reward()
             return text
 
         if not allow_retry or not _is_transient(error):
             raise ModelUnavailable(error)
 
-        # 재시도 전에 물러선다. 같은 간격으로 즉시 다시 던지면 같은 503 이 온다.
-        # 공급자 실패는 호출 예산에서 환불되므로(§refund_failed_call) 여기서
-        # 몇 번 더 시도해도 조사 예산을 태우지 않는다. 실질 한계는 시간 예산이다.
+        # 두 가지 실패를 구분해 다르게 대응한다.
+        #
+        #   429  우리가 너무 빨리 불렀다  → 간격을 벌린다
+        #   503  공급자가 과부하다        → 다른 모델로 넘어간다
+        #
+        # 실측(2026-09-28)에서 주 모델의 성공률이 1/8 이었고 503 은 0.1초 만에
+        # 즉시 거절됐다. 우리가 만든 부하가 아니므로 기다려도 줄지 않는다.
+        # 호출 예산은 환불되므로(§refund_failed_call) 재시도가 조사 예산을
+        # 태우지 않는다. 실질 한계는 시간 예산이다.
+        fallbacks = iter(self.config.fallback_models)
         for retry_index in range(MAX_TRANSIENT_RETRIES):
-            if self.ledger.provider_failures_exhausted:
+            if self.ledger.provider_failures_exhausted_for(agent_id):
                 raise ModelUnavailable(
                     f"공급자 실패가 {self.ledger.failed_attempts}회 누적되어 "
-                    f"중단합니다: {error}"
+                    f"{agent_id} 의 재시도를 중단합니다: {error}"
                 )
+            if is_rate_limited(error):
+                wanted = self.limiter.penalize(parse_retry_after(error))
+            else:
+                # 과부하다. 남은 폴백이 있으면 기다리지 말고 갈아탄다.
+                nxt = next(fallbacks, None)
+                if nxt is not None:
+                    model = nxt
+                    wanted = 0.0
+                else:
+                    wanted = 3.0 * (retry_index + 1)
             delay = min(
-                3.0 * (retry_index + 1),
+                wanted,
                 max(0.0, self.ledger.usable_seconds - self.config.timeout_seconds),
             )
             if delay > 0:
                 self.ledger.cancel.wait(delay)
             self.ledger.cancel.raise_if_cancelled()
+            self.limiter.mark()
 
             text, error = self._attempt(
-                agent_id, messages, retry_of=len(self.calls)
+                agent_id, messages, retry_of=len(self.calls), model=model
             )
             if error is None:
+                self.limiter.reward()
                 return text
             if not _is_transient(error):
                 break
 
         raise ModelUnavailable(error)
 
+    def _pace(self) -> None:
+        """최소 간격이 지날 때까지 취소 가능하게 기다린다."""
+        delay = self.limiter.due()
+        if delay > 0:
+            self.ledger.cancel.wait(min(delay, max(0.0, self.ledger.usable_seconds)))
+            self.ledger.cancel.raise_if_cancelled()
+        self.limiter.mark()
+
     def _attempt(
-        self, agent_id: str, messages: list[dict[str, Any]], *, retry_of: int | None
+        self,
+        agent_id: str,
+        messages: list[dict[str, Any]],
+        *,
+        retry_of: int | None,
+        model: str | None = None,
     ) -> tuple[str, str | None]:
         estimated = estimate_tokens(messages)
         reservation = self.ledger.reserve_model_call(agent_id, estimated)
@@ -176,6 +336,7 @@ class ModelGateway:
         try:
             text, usage = self.backend.complete(
                 messages,
+                model=model,
                 max_tokens=max_output,
                 timeout=min(
                     self.config.timeout_seconds, max(1.0, self.ledger.usable_seconds)
@@ -196,6 +357,7 @@ class ModelGateway:
             call = ModelCall(
                 agent_id=agent_id, input_tokens=None, output_tokens=None,
                 latency_ms=latency_ms, tokens_kind="failed", error=error,
+                model=model or self.config.model,
                 retry_of=retry_of, started_ms=started_ms,
                 ended_ms=int(self.ledger.elapsed * 1000),
             )
@@ -213,6 +375,7 @@ class ModelGateway:
 
         call = ModelCall(
             agent_id=agent_id,
+            model=model or self.config.model,
             input_tokens=(usage or {}).get("input_tokens"),
             output_tokens=(usage or {}).get("output_tokens"),
             latency_ms=latency_ms,
@@ -291,6 +454,8 @@ class NvidiaChatBackend:
     `max_retries=0` 이다. 재시도는 게이트웨이가 계측하며 센다.
     """
 
+    is_remote = True
+
     def __init__(self, config: ModelConfig, cancel_token: Any = None) -> None:
         key = config.api_key()
         if not key:
@@ -310,12 +475,17 @@ class NvidiaChatBackend:
             cancel_token.on_cancel(self._client.close)
 
     def complete(
-        self, messages: list[dict[str, Any]], *, max_tokens: int, timeout: float
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        max_tokens: int,
+        timeout: float,
+        model: str | None = None,
     ) -> tuple[str, dict[str, int] | None]:
         response = self._client.post(
             "/chat/completions",
             json={
-                "model": self.config.model,
+                "model": model or self.config.model,
                 "messages": messages,
                 "temperature": self.config.temperature,
                 "max_tokens": max_tokens,
@@ -373,12 +543,19 @@ class ScriptedBackend:
     실제 모델 trace 와 구분해 표기한다.
     """
 
+    is_remote = False
+
     responses: list[str]
     usage_per_call: dict[str, int] | None = None
     _index: int = 0
 
     def complete(
-        self, messages: list[dict[str, Any]], *, max_tokens: int, timeout: float
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        max_tokens: int,
+        timeout: float,
+        model: str | None = None,
     ) -> tuple[str, dict[str, int] | None]:
         if self._index >= len(self.responses):
             raise RuntimeError("scripted 응답이 소진되었습니다.")

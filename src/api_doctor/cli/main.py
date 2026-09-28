@@ -259,7 +259,7 @@ def _run_recovery_eval(
         hidden = {True: "통과", False: "실패", None: "미실행"}[row.hidden_passed]
         err.print(
             f"  {mark} {row.name:34} [dim]{str(row.status):26}"
-            f"비공개={hidden:5} 호출 {row.model_calls:2} 503 {row.provider_failures:2}"
+            f"비공개={hidden:5} 호출 {row.model_calls:2} 공급자실패 {row.provider_failures:2}"
             f" {row.duration_ms // 1000:3}초[/]"
         )
 
@@ -281,7 +281,7 @@ def _run_recovery_eval(
         err.print(f"  거짓 성공 [{style}]{s['false_successes']}건[/]")
         err.print(
             f"  [dim]모델 호출 {s['total_model_calls']} · 토큰 {s['total_tokens']:,}"
-            f" · 503 {s['total_provider_failures']} · 평균 {s['avg_calls']}회/건[/]"
+            f" · 공급자실패 {s['total_provider_failures']} · 평균 {s['avg_calls']}회/건[/]"
         )
     _emit(payload, as_json)
     raise typer.Exit(0 if report.false_successes == 0 else 3)

@@ -28,6 +28,8 @@ AGENT_IDS = (
 
 # 비교 실험 B 의 단일 에이전트. 제품 구조에 포함되지 않는다.
 SINGLE_AGENT = "single_agent"
+#: 실패 예비분을 쓸 수 있는 후반 역할. 여기까지 왔으면 끝을 봐야 한다.
+_REPAIR_STAGES = frozenset({"repair_engineer", "data_auditor", SINGLE_AGENT})
 
 
 class Resource(StrEnum):
@@ -171,6 +173,11 @@ class Limits:
     # 실측(2026-09-28) 결과 503 이 잦아 6회로는 조사 도중 끊긴다.
     # 실패는 환불되므로 실질 한계는 전체 시간 예산이다.
     max_provider_failures: int = 25
+    #: 수리·감사를 위해 남겨 두는 공급자 실패 허용량.
+    #: 실측에서 조사 역할이 429 로 25회를 전부 태워, 수리자가 첫 시도에서
+    #: 실패했을 때 재시도할 여지가 남아 있지 않았다. 고칠 단계에 도달하고도
+    #: 한 번을 못 돌아보는 것이 가장 비싼 낭비다.
+    provider_failures_reserved_for_repair: int = 8
 
 
 @dataclass(slots=True)
@@ -413,9 +420,20 @@ class BudgetLedger:
             agent_id=reservation.agent_id, reason="provider_no_response",
         )
 
+    def provider_failures_exhausted_for(self, agent_id: str) -> bool:
+        """이 역할이 더 재시도해도 되는가.
+
+        조사 역할에는 예비분을 뺀 몫만 준다. 그러지 않으면 공급자가 불안정한
+        날에 조사만 하다 끝나고, 정작 고칠 단계에서는 한 번도 못 돌아본다.
+        """
+        budget = self.limits.max_provider_failures
+        if agent_id not in _REPAIR_STAGES:
+            budget -= self.limits.provider_failures_reserved_for_repair
+        return self.failed_attempts >= max(0, budget)
+
     @property
     def provider_failures_exhausted(self) -> bool:
-        """공급자 실패가 너무 잦으면 중단한다."""
+        """전체 한도. 역할 구분 없이 물을 때 쓴다."""
         return self.failed_attempts >= self.limits.max_provider_failures
 
     def settle_model_call(
