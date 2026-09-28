@@ -211,6 +211,11 @@ class BudgetLedger:
 
     # 종료 검증용 예약 슬롯. 새 위임이 이것을 소비할 수 없다.
     finish_slot_reserved: bool = True
+
+    # 공식 데이터 호출 상한을 강제할지. fixture 는 동결분만 읽으므로
+    # 공급자에게 나가는 호출이 없어 강제하지 않는다 (PRD §4.1).
+    # 사용량은 어느 쪽이든 기록한다.
+    enforce_broker_quota: bool = True
     events: list[dict[str, Any]] = field(default_factory=list)
 
     # ------------------------------------------------------------------ 잔여
@@ -249,7 +254,10 @@ class BudgetLedger:
             "tokens": self.limits.tokens - self.tokens_committed,
             "seconds": round(self.usable_seconds, 1),
             "sandbox_runs": self.usable_sandbox_runs,
-            "broker_calls": self.limits.broker_calls - self.broker_calls,
+            "broker_calls": (
+                self.limits.broker_calls - self.broker_calls
+                if self.enforce_broker_quota else None
+            ),
             "delegations": self.limits.delegations - self.delegations,
             "patches": self.limits.patches - self.patches,
             "role_calls": {
@@ -335,6 +343,8 @@ class BudgetLedger:
         base = self._preconditions()
         if base is not None:
             return base
+        if not self.enforce_broker_quota:
+            return ALLOW
         if self.broker_calls >= self.limits.broker_calls:
             return Verdict(
                 False, DenyReason.BROKER_EXHAUSTED,
@@ -465,13 +475,15 @@ class BudgetLedger:
         self._log("reserve", Resource.SANDBOX_RUNS, is_finish=True)
         return ALLOW
 
-    def record_broker_calls(self, count: int, *, enforce: bool = True) -> None:
+    def record_broker_calls(self, count: int, *, enforce: bool | None = None) -> None:
         """브로커 호출을 기록한다.
 
-        `enforce` 가 거짓이면 상한을 적용하지 않는다 — fixture 는 동결분만
-        읽으므로 공급자에게 나가는 호출이 없다. 그래도 사용량은 기록한다.
+        강제 여부는 원장의 `enforce_broker_quota` 를 따른다. 사용량은
+        어느 쪽이든 기록하므로 보고서의 수치는 항상 실제 호출 수다.
         """
-        if not enforce:
+        if enforce is not None:
+            self.enforce_broker_quota = enforce
+        if not self.enforce_broker_quota:
             self.broker_calls += count
             return
         for _ in range(count):
@@ -514,6 +526,7 @@ class BudgetLedger:
             "wall_seconds": round(self.elapsed, 1),
             "sandbox_runs": self.sandbox_runs,
             "broker_calls": self.broker_calls,
+            "broker_quota_enforced": self.enforce_broker_quota,
             "delegations": self.delegations,
             "patches": self.patches,
             "provider_failures": self.failed_attempts,
