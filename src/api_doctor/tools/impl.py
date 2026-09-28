@@ -247,7 +247,7 @@ def _run_probe(session: RunSession):
             outcome=str(result.outcome), agent_id=context.agent_id,
             candidate_hash=context.candidate_hash,
         )
-        return {
+        payload: dict[str, Any] = {
             "probe_result_id": result.probe_result_id,
             "evidence_id": evidence.evidence_id,
             "invariant": result.invariant,
@@ -256,8 +256,48 @@ def _run_probe(session: RunSession):
             "covers": list(result.covers),
             "detail": result.detail,
         }
+        if context.agent_id == AUDIT:
+            payload["audit_coverage"] = _coverage_status(session, context)
+        return payload
 
     return run_probe
+
+
+def _coverage_status(session: RunSession, context: ToolContext) -> dict[str, Any]:
+    """감사 완료까지 무엇이 남았는지 도구 결과에 실어 보낸다.
+
+    감사자는 계약의 위험 영역을 **모두** 덮어야 완료된다. 어떤 영역이
+    아직 비었는지 알려주지 않으면 한쪽만 돌리고 끝내, 고정 검증을 통과한
+    후보가 MISSING_AUDIT 로 되돌려보내진다. 실측에서 가장 잦은 실패였다.
+
+    이것은 안내일 뿐이며 판정은 종료 게이트가 별도로 한다.
+    """
+    from ..verify.probes import coverage_of
+
+    required = {a.risk_id for a in session.dataset.contract.audit_requirements}
+    covered = coverage_of(session.executed_probes_for(context.candidate_hash))
+    remaining = sorted(required - covered)
+
+    catalog = session.dataset.probes
+    suggestions = {
+        risk: [
+            probe.probe_id
+            for probe in catalog.probes
+            if risk in probe.covers
+            and probe.probe_id in (context.allowed_probe_ids or ())
+        ]
+        for risk in remaining
+    }
+    return {
+        "covered_risks": sorted(covered & required),
+        "remaining_risks": remaining,
+        "probes_for_remaining": suggestions,
+        "note": (
+            "모든 위험 영역을 덮어야 감사가 완료됩니다."
+            if remaining
+            else "필수 위험 영역을 모두 덮었습니다. 이제 결론을 내세요."
+        ),
+    }
 
 
 # ------------------------------------------------------------------ 패치

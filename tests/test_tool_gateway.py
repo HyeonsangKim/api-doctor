@@ -9,9 +9,15 @@ from api_doctor.runtime.evidence import (
     AUDIT, DIAG, MAIN, REPAIR, SPEC, EvidenceError, EvidenceKind, EvidenceStore,
     Visibility, can_read,
 )
+from pathlib import Path as _Path
+
 from api_doctor.tools.gateway import (
     ACTION_ACL, TOOL_ACL, Action, Lease, Tool, ToolContext, ToolError, ToolGateway,
 )
+
+from _docker import requires_docker
+
+_TESTS_DIR = _Path(__file__).resolve().parent
 
 ROLES = (MAIN, SPEC, DIAG, REPAIR, AUDIT)
 
@@ -169,3 +175,65 @@ def test_assertions_are_distinguished_from_observations(tmp_path) -> None:
               source="model", created_by=AUDIT, summary="괜찮아 보입니다",
               body={"claim": "no issue"}, candidate_hash="sha256:v1")
     assert store.observations_for("sha256:v1") == []
+
+
+@requires_docker
+def test_probe_result_tells_auditor_what_remains(tmp_path) -> None:
+    """감사자에게 남은 위험 영역을 도구 결과로 알려준다.
+
+    실측에서 가장 잦은 실패가 "고정 검증은 통과했는데 감사가 한쪽 영역만
+    덮어 MISSING_AUDIT" 였다. 판정은 여전히 종료 게이트가 한다.
+    """
+    import sys
+
+    sys.path.insert(0, str(_TESTS_DIR))
+    from _harness import make_session
+
+    from api_doctor.runtime.envelope import _AUDIT_PROBES
+    from api_doctor.tools.gateway import make_lease
+    from api_doctor.tools.impl import register_all
+
+    session = make_session(tmp_path, start="healthy")
+    gateway = ToolGateway(ledger=session.ledger)
+    register_all(gateway, session)
+    context = ToolContext(
+        run_id=session.run_id, task_id="t", agent_id=AUDIT,
+        candidate_hash=session.current_hash,
+        contract_hash=session.dataset.contract.contract_hash,
+        snapshot_hash=session.snapshot.snapshot_hash,
+        lease=make_lease(session.ledger, AUDIT),
+        allowed_probe_ids=_AUDIT_PROBES,
+    )
+    bound = gateway.bind(context)
+
+    first = bound["run_probe"](probe_id="page_partition")["audit_coverage"]
+    assert first["remaining_risks"] == ["mapping_preservation"]
+    assert first["probes_for_remaining"]["mapping_preservation"] == ["field_presence"]
+
+    second = bound["run_probe"](probe_id="field_presence")["audit_coverage"]
+    assert second["remaining_risks"] == []
+
+
+@requires_docker
+def test_coverage_hint_is_not_given_to_other_roles(tmp_path) -> None:
+    """감사 안내는 감사자에게만 간다."""
+    import sys
+
+    sys.path.insert(0, str(_TESTS_DIR))
+    from _harness import make_session
+
+    from api_doctor.tools.gateway import make_lease
+    from api_doctor.tools.impl import register_all
+
+    session = make_session(tmp_path, start="healthy")
+    gateway = ToolGateway(ledger=session.ledger)
+    register_all(gateway, session)
+    context = ToolContext(
+        run_id=session.run_id, task_id="t", agent_id=DIAG,
+        candidate_hash=session.current_hash,
+        contract_hash=session.dataset.contract.contract_hash,
+        snapshot_hash=session.snapshot.snapshot_hash,
+        lease=make_lease(session.ledger, DIAG),
+    )
+    result = gateway.bind(context)["run_probe"](probe_id="page_partition")
+    assert "audit_coverage" not in result
