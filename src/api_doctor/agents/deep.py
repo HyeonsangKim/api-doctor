@@ -49,6 +49,10 @@ DELEGATION_TARGETS = (
 ALLOWED_BUILTIN = frozenset({"read_file", "task"})
 
 
+# 프로세스당 한 번만 프로파일을 등록하기 위한 기록.
+_REGISTERED_PROFILES: set[str] = set()
+
+
 class HarnessUnavailable(RuntimeError):
     """deepagents 하네스를 구성할 수 없습니다."""
 
@@ -257,13 +261,19 @@ def build_team(
     # main 호출 8회가 나가고, 그 호출이 무엇을 위한 것인지 원장에서 구분되지
     # 않는다. FilesystemMiddleware·SubAgentMiddleware 와 달리 이것은 필수
     # scaffolding 이 아니라 제외할 수 있다.
-    register_harness_profile(
-        get_model_provider(lead_model) or "api-doctor-gateway",
-        HarnessProfile(
-            general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=False),
-            excluded_middleware=[_DeepAgentsSummarizationMiddleware],
-        ),
-    )
+    # 같은 키로 두 번 등록하면 라이브러리가 프로파일을 병합하는데,
+    # excluded_middleware 는 집합 연산으로 합쳐지므로 frozenset 이어야 한다.
+    # 프로세스당 한 번만 등록해 병합 자체를 피한다.
+    profile_key = get_model_provider(lead_model) or "api-doctor-gateway"
+    if profile_key not in _REGISTERED_PROFILES:
+        register_harness_profile(
+            profile_key,
+            HarnessProfile(
+                general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=False),
+                excluded_middleware=frozenset({_DeepAgentsSummarizationMiddleware}),
+            ),
+        )
+        _REGISTERED_PROFILES.add(profile_key)
 
     def factory_for(agent_id: str) -> Callable[[], ToolContext]:
         def make() -> ToolContext:
