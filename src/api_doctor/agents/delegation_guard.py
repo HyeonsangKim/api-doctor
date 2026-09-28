@@ -38,6 +38,16 @@ class DelegationRecord:
     candidate_hash: str = ""
 
     @property
+    def produced_nothing(self) -> bool:
+        """아무 일도 못 하고 끝났는가.
+
+        도구도 못 쓰고 구조화 반환도 못 낸 경우다. 공급자 장애로 모델
+        호출이 전부 실패하면 이렇게 된다. 같은 역할을 바로 다시 불러도
+        같은 결과가 나오므로 재위임을 막는다.
+        """
+        return self.accepted and not self.tool_calls and not self.completed
+
+    @property
     def completed(self) -> bool:
         """이 위임이 결론까지 냈는가.
 
@@ -59,7 +69,11 @@ class DelegationGuard(AgentMiddleware):
     #: 수리·감사를 위해 남겨 두는 모델 호출 수.
     #: 조사 역할이 전체 예산을 먹어 감사가 굶는 것을 막는다.
     RESERVED_FOR_LATE_STAGES = 8
+    #: 수리가 끝난 뒤 감사만 남았을 때 감사에 남겨 두는 호출 수.
+    #: 감사는 probe 를 돌리고 구조화 결론까지 내야 하므로 이 정도가 필요하다.
+    RESERVED_FOR_AUDIT = 5
     LATE_STAGES = ("repair_engineer", "data_auditor")
+    AUDIT = "data_auditor"
 
     def __init__(
         self,
@@ -69,8 +83,10 @@ class DelegationGuard(AgentMiddleware):
         targets: tuple[str, ...],
         current_hash: Callable[[], str],
         inventory: dict[str, list[str]],
+        tool_log: list[dict[str, Any]] | None = None,
     ) -> None:
         super().__init__()
+        self._tool_log = tool_log
         self._ledger = ledger
         self._events = events
         self._targets = set(targets)
@@ -120,8 +136,14 @@ class DelegationGuard(AgentMiddleware):
             allowed_tools=self._inventory.get(agent_id, []),
         )
 
+        before = len(self._tool_log) if self._tool_log is not None else 0
         result = handler(request)
         record.returned = _text_of(result)
+        if self._tool_log is not None:
+            record.tool_calls = [
+                entry["tool"] for entry in self._tool_log[before:]
+                if entry.get("agent_id") == agent_id and entry.get("allowed")
+            ]
         return result
 
     # -------------------------------------------------------------- 검사
@@ -135,6 +157,23 @@ class DelegationGuard(AgentMiddleware):
             )
 
         candidate_hash = self._current_hash()
+
+        # 직전 위임이 아무것도 못 하고 끝났으면 바로 다시 부르지 않는다.
+        # 공급자 장애로 모델 호출이 전부 실패한 상황이라 같은 결과가 나온다.
+        # 실측에서 repair_engineer 가 이렇게 세 번 연속 호출됐다.
+        previous = [r for r in self.records if r.agent_id == agent_id and r.accepted]
+        if previous and previous[-1].produced_nothing:
+            self._events.append(
+                EventType.DELEGATION_REJECTED,
+                f"{agent_id} 의 직전 위임이 아무것도 수행하지 못했습니다.",
+                reason="PREVIOUS_ATTEMPT_EMPTY", agent_id=agent_id,
+            )
+            return (
+                "PREVIOUS_ATTEMPT_EMPTY",
+                f"{agent_id} 의 직전 위임이 도구도 쓰지 못하고 결론도 내지 "
+                "못했습니다. 공급자 오류일 가능성이 큽니다. 같은 역할을 바로 "
+                "다시 부르지 말고 다음 단계로 넘어가거나 종료하세요.",
+            )
 
         pending_late = [
             stage for stage in self.LATE_STAGES
@@ -163,6 +202,23 @@ class DelegationGuard(AgentMiddleware):
                 f"{answered[-1].returned[:200]}\n"
                 "같은 질문을 다시 하지 말고 다음 단계로 넘어가세요.",
             )
+
+        # 감사만 남았으면 감사 몫을 따로 지킨다. 수리 재시도가 이것을
+        # 먹으면 고쳐 놓고도 감사를 못 해 inconclusive 로 끝난다 —
+        # 실측에서 가장 흔한 손실이었다.
+        if agent_id != self.AUDIT and self.AUDIT in pending_late:
+            remaining = self._ledger.remaining()["model_calls"]
+            if remaining <= self.RESERVED_FOR_AUDIT:
+                self._events.append(
+                    EventType.DELEGATION_REJECTED,
+                    f"{agent_id} 위임을 보류했습니다. 남은 호출을 감사에 씁니다.",
+                    reason="RESERVED_FOR_AUDIT", agent_id=agent_id,
+                )
+                return (
+                    "RESERVED_FOR_AUDIT",
+                    f"남은 호출 {remaining}회는 data_auditor 를 위해 남겨 둡니다. "
+                    "감사 없이는 성공할 수 없으니 지금 감사를 위임하세요.",
+                )
 
         # 수리·감사를 위한 호출을 남겨 둔다.
         if agent_id not in self.LATE_STAGES and pending_late:

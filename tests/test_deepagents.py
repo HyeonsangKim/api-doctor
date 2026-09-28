@@ -409,3 +409,43 @@ def test_investigation_is_capped_while_repair_and_audit_pend(tmp_path) -> None:
     ]
     assert rejected, "수리·감사가 남았는데 조사 반복이 통과했다"
     assert session.ledger.role_delegations["spec_researcher"] == 1
+
+
+@requires_docker
+def test_empty_delegation_is_not_repeated(tmp_path) -> None:
+    """아무것도 못 한 역할을 바로 다시 부르지 않는다.
+
+    실측에서 공급자 장애로 repair_engineer 가 세 번 연속 아무 일도 못 하고
+    호출됐다. 환불 설계 때문에 예산 검사가 계속 통과한 탓이다.
+    """
+    from _harness import j
+
+    session = make_session(tmp_path)
+    # 위임은 받되 도구도 못 쓰고 구조화 반환도 못 내는 응답
+    _run_script(session, [
+        j({"tool": "task", "args": {"subagent_type": "repair_engineer",
+                                    "description": "고쳐줘"}}),
+        "모델이 형식을 지키지 못한 평문 응답",
+        j({"tool": "task", "args": {"subagent_type": "repair_engineer",
+                                    "description": "다시 고쳐줘"}}),
+        j({"outcome": "completed", "summary": "끝"}),
+    ])
+    rejected = [
+        e for e in session.events.read(session.paths.run_dir)
+        if e.type is EventType.DELEGATION_REJECTED
+        and e.data.get("reason") == "PREVIOUS_ATTEMPT_EMPTY"
+    ]
+    assert rejected, "빈 위임이 반복됐다"
+
+
+def test_audit_budget_is_reserved_after_repair() -> None:
+    """수리가 끝나고 감사만 남았으면 감사 몫을 지킨다."""
+    from api_doctor.agents.delegation_guard import DelegationGuard
+
+    assert DelegationGuard.AUDIT == "data_auditor"
+    assert DelegationGuard.RESERVED_FOR_AUDIT >= 3, (
+        "감사는 probe 를 돌리고 구조화 결론까지 내야 한다"
+    )
+    assert (
+        DelegationGuard.RESERVED_FOR_AUDIT < DelegationGuard.RESERVED_FOR_LATE_STAGES
+    ), "감사 단독 예약은 수리+감사 예약보다 작아야 한다"

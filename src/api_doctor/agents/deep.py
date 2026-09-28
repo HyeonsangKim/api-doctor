@@ -308,6 +308,7 @@ def build_team(
         targets=DELEGATION_TARGETS,
         current_hash=lambda: session.current_hash,
         inventory=inventory_preview,
+        tool_log=gateway.call_log_ref,
     )
 
     agent = create_deep_agent(

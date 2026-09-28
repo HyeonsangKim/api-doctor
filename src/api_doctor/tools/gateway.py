@@ -210,7 +210,13 @@ class ToolGateway:
 
     @property
     def call_log(self) -> list[dict[str, Any]]:
+        """복사본. 보고서와 프로파일이 쓴다."""
         return list(self._log)
+
+    @property
+    def call_log_ref(self) -> list[dict[str, Any]]:
+        """살아 있는 참조. 위임 경계가 진행 중 호출을 보기 위해 쓴다."""
+        return self._log
 
     def inventory_for(self, agent_id: str) -> list[str]:
         """해당 역할에게 실제로 발급되는 도구 이름. AC-01 검사에 쓴다."""
