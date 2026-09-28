@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1640 520" role="img" aria-labelledby="t2 d2">
+<title id="t2">실행 흐름과 모델 호출 구간</title>
+<desc id="d2">입력 검사, 격리 경계 확인, 원본 격리 실행, 고정 검증까지는 모델을 호출하지 않는다. 원본이 계약을 만족하면 verified_unchanged 로, 인증 오류나 제공기관 장애면 모델 없이 중단된다. 결함이 확인된 경우에만 복구 루프로 들어가 모델을 호출하며, 모든 경로가 종료 게이트로 수렴한다.</desc>
+<style>
+.bx{rx:8;ry:8;stroke-width:1.5}
+.bt{font:600 13.5px "IBM Plex Sans KR",sans-serif;text-anchor:middle}
+.bs{font:400 11px "IBM Plex Mono",monospace;text-anchor:middle}
+.e{fill:none;stroke-width:1.8}
+.el{font:500 11.5px "IBM Plex Mono",monospace}
+.band{font:600 13px "IBM Plex Sans KR",sans-serif}
+.dia{stroke-width:1.5}
+</style>
+<defs>
+<marker id="g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#69717f"/></marker>
+<marker id="go" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1f7a4d"/></marker>
+<marker id="gb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#b13636"/></marker>
+</defs>
+
+<!-- 모델 없는 구간 -->
+<rect x="20" y="52" width="880" height="236" rx="12" ry="12" fill="#eef7f1" stroke="#bfe0cd" stroke-width="1.5" stroke-dasharray="7 5"/>
+<text class="band" x="40" y="78" fill="#1f7a4d">모델 호출 0회 — 여기까지는 LLM 이 관여하지 않는다</text>
+
+<!-- 모델 구간 -->
+<rect x="928" y="52" width="692" height="236" rx="12" ry="12" fill="#fdf5e8" stroke="#e8d2a6" stroke-width="1.5" stroke-dasharray="7 5"/>
+<text class="band" x="948" y="78" fill="#a96a12">복구 루프 — 여기서만 모델을 부른다</text>
+
+<!-- 단계 -->
+<rect class="bx" x="44" y="100" width="150" height="66" fill="#fff" stroke="#c9cfda"/>
+<text class="bt" x="119" y="126" fill="#14161c">입력 검사</text>
+<text class="bs" x="119" y="145" fill="#69717f">서명 · 크기</text>
+<text class="bs" x="119" y="160" fill="#69717f">비밀값 탐지</text>
+
+<rect class="bx" x="226" y="100" width="160" height="66" fill="#fff" stroke="#c9cfda"/>
+<text class="bt" x="306" y="126" fill="#14161c">격리 경계 확인</text>
+<text class="bs" x="306" y="145" fill="#69717f">자가검사 5종</text>
+<text class="bs" x="306" y="160" fill="#b13636">실패 시 실행 안 함</text>
+
+<rect class="bx" x="418" y="100" width="160" height="66" fill="#fff" stroke="#c9cfda"/>
+<text class="bt" x="498" y="126" fill="#14161c">원본 격리 실행</text>
+<text class="bs" x="498" y="145" fill="#69717f">동결 스냅샷으로</text>
+<text class="bs" x="498" y="160" fill="#69717f">broker 가 해소</text>
+
+<rect class="bx" x="610" y="100" width="170" height="66" fill="#fff" stroke="#2f5fb8" stroke-width="2.4"/>
+<text class="bt" x="695" y="126" fill="#14161c">고정 검증 + 분류</text>
+<text class="bs" x="695" y="145" fill="#2f5fb8">실행·필드·값·전체성</text>
+<text class="bs" x="695" y="160" fill="#69717f">공급자 오류 분류</text>
+
+<path class="e" d="M194,133 L222,133" stroke="#69717f" marker-end="url(#g)"/>
+<path class="e" d="M386,133 L414,133" stroke="#69717f" marker-end="url(#g)"/>
+<path class="e" d="M578,133 L606,133" stroke="#69717f" marker-end="url(#g)"/>
+
+<!-- 세 갈래 -->
+<rect class="bx" x="44" y="214" width="252" height="62" fill="#eef7f1" stroke="#bfe0cd"/>
+<text class="bt" x="170" y="240" fill="#14161c">verified_unchanged</text>
+<text class="bs" x="170" y="260" fill="#1f7a4d">원본이 이미 계약을 만족 · 모델 0회</text>
+
+<rect class="bx" x="322" y="214" width="252" height="62" fill="#fdefee" stroke="#eec4c0"/>
+<text class="bt" x="448" y="240" fill="#14161c">needs_user_action</text>
+<text class="bs" x="448" y="260" fill="#b13636">인증 만료 · 제공기관 장애</text>
+
+<rect class="bx" x="600" y="214" width="252" height="62" fill="#f4f5f8" stroke="#c9cfda"/>
+<text class="bt" x="726" y="240" fill="#14161c">결함 확인</text>
+<text class="bs" x="726" y="260" fill="#69717f">여기서부터 위임이 필요하다</text>
+
+<path class="e" d="M655,170 L655,180 L170,180 L170,210" stroke="#1f7a4d" marker-end="url(#go)"/>
+<text class="el" x="186" y="175" fill="#1f7a4d">네 검사 모두 통과</text>
+<path class="e" d="M700,170 L700,198 L448,198 L448,210" stroke="#b13636" marker-end="url(#gb)"/>
+<text class="el" x="458" y="193" fill="#b13636">인증·장애 분류</text>
+<path class="e" d="M760,170 L760,204 L726,204 L726,210" stroke="#69717f" marker-end="url(#g)"/>
+
+<!-- 복구 루프 -->
+<rect class="bx" x="950" y="100" width="180" height="66" fill="#fff" stroke="#d9b877" stroke-width="2.2"/>
+<text class="bt" x="1040" y="126" fill="#14161c">main 이 위임을 정한다</text>
+<text class="bs" x="1040" y="145" fill="#69717f">필요한 조사만 고른다</text>
+<text class="bs" x="1040" y="160" fill="#a96a12">모든 역할을 부르지 않는다</text>
+
+<rect class="bx" x="1164" y="100" width="180" height="66" fill="#fff" stroke="#e8d2a6"/>
+<text class="bt" x="1254" y="120" fill="#14161c">전문가가 조사</text>
+<text class="bs" x="1254" y="139" fill="#69717f">명세 · 진단 · 수리</text>
+<text class="bs" x="1254" y="156" fill="#69717f">감사 (중립 봉투)</text>
+
+<rect class="bx" x="1378" y="100" width="222" height="66" fill="#fff" stroke="#2f5fb8" stroke-width="2.4"/>
+<text class="bt" x="1489" y="126" fill="#14161c">종료 게이트</text>
+<text class="bs" x="1489" y="145" fill="#2f5fb8">우회 불가 · 네 단계 검사</text>
+<text class="bs" x="1489" y="160" fill="#69717f">모든 경로가 여기로 수렴</text>
+
+<path class="e" d="M852,245 L900,245 L900,133 L946,133" stroke="#69717f" marker-end="url(#g)"/>
+<path class="e" d="M1130,133 L1160,133" stroke="#a96a12" marker-end="url(#g)"/>
+<path class="e" d="M1344,133 L1374,133" stroke="#a96a12" marker-end="url(#g)"/>
+
+<!-- 게이트 결과 -->
+<rect class="bx" x="1378" y="200" width="222" height="62" fill="#eef7f1" stroke="#bfe0cd"/>
+<text class="bt" x="1489" y="226" fill="#14161c">verified_repaired</text>
+<text class="bs" x="1489" y="246" fill="#1f7a4d">네 조건 모두 만족할 때만</text>
+<path class="e" d="M1489,170 L1489,196" stroke="#1f7a4d" marker-end="url(#go)"/>
+
+<!-- 되돌림 -->
+<path class="e" d="M1378,152 L1352,152 L1352,186 L1040,186 L1040,170" stroke="#b13636" stroke-dasharray="6 4" marker-end="url(#gb)"/>
+<text class="el" x="1062" y="182" fill="#b13636">되돌려보냄 — 감사 미완료 · 검증 실패</text>
+
+<!-- 하단 주석 -->
+<text x="20" y="330" font-family="'IBM Plex Sans KR',sans-serif" font-size="13.5" font-weight="600" fill="#14161c">이 흐름이 말하는 것</text>
+<text x="20" y="356" font-family="'IBM Plex Mono',monospace" font-size="12" fill="#39404e">· 정상 코드와 인증 오류는 모델을 한 번도 부르지 않고 끝난다 — 쉬운 경우에 팀을 부르는 비용을 쓰지 않는다</text>
+<text x="20" y="378" font-family="'IBM Plex Mono',monospace" font-size="12" fill="#39404e">· 인증이 막힌 응답으로 계약을 검증하는 것은 의미가 없으므로 고정 검증 자체를 건너뛴다</text>
+<text x="20" y="400" font-family="'IBM Plex Mono',monospace" font-size="12" fill="#39404e">· main 의 종료 요청 · 일반 텍스트 종료 · agent 예외 · 루프 상한이 전부 같은 게이트로 수렴한다</text>
+<text x="20" y="422" font-family="'IBM Plex Mono',monospace" font-size="12" fill="#39404e">· 게이트가 되돌려보내면 남은 예산과 패치 한도 안에서 한 번 더 시도한다 (최대 2회)</text>
+<text x="20" y="444" font-family="'IBM Plex Mono',monospace" font-size="12" fill="#39404e">· 강제 중단(취소 · 예산 소진 · 정책 차단) 뒤에는 통과한 검사가 있어도 verified 로 승격하지 않는다</text>
+</svg>

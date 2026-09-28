@@ -1,0 +1,192 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1640 1120" role="img" aria-labelledby="t1 d1">
+<title id="t1">API닥터 신뢰 영역 아키텍처</title>
+<desc id="d1">사용자 영역의 CLI가 신뢰 영역의 런타임을 호출한다. 런타임이 메인 에이전트에게 작업 봉투를 발급하고, 메인은 네 전문 에이전트에게 위임한다. 모든 도구 호출은 도구 게이트웨이를, 모든 추론은 모델 게이트웨이를 지난다. 후보 코드는 네트워크 없는 실행 영역에서만 돌고 동결 스냅샷으로만 데이터를 받는다. 최종 판정은 고정 검증기와 종료 게이트가 한다.</desc>
+<style>
+.zb{rx:14;ry:14;stroke-width:1.5}
+.zl{font:600 15px "IBM Plex Sans KR",sans-serif}
+.zs{font:400 12px "IBM Plex Mono",monospace}
+.nd{rx:8;ry:8;stroke-width:1.4}
+.nt{font:600 14px "IBM Plex Sans KR",sans-serif;text-anchor:middle}
+.ns{font:400 11.5px "IBM Plex Mono",monospace;text-anchor:middle}
+.e{fill:none;stroke-width:1.7}
+.ex{fill:none;stroke-width:3.2}
+.ed{fill:none;stroke-width:1.8;stroke-dasharray:6 5}
+.el{font:500 12px "IBM Plex Mono",monospace}
+.bl{font:600 12.5px "IBM Plex Sans KR",sans-serif}
+</style>
+<defs>
+<marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#69717f"/></marker>
+<marker id="aT" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2f5fb8"/></marker>
+<marker id="aA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#a96a12"/></marker>
+<marker id="aS" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#b13636"/></marker>
+</defs>
+
+<!-- Zone U -->
+<rect class="zb" x="30" y="26" width="320" height="104" fill="#f4f5f8" stroke="#dfe2e9"/>
+<text class="zl" x="50" y="52" fill="#39404e">Zone U · 사용자</text>
+<text class="zs" x="185" y="52" fill="#69717f">OS user: operator</text>
+<rect class="nd" x="50" y="68" width="280" height="44" fill="#fff" stroke="#c9cfda"/>
+<text class="nt" x="190" y="87" fill="#14161c">api-doctor CLI</text>
+<text class="ns" x="190" y="103" fill="#69717f">run · show · replay · eval</text>
+
+<!-- Zone A -->
+<rect class="zb" x="30" y="162" width="1580" height="268" fill="#fdf5e8" stroke="#e8d2a6"/>
+<text class="zl" x="50" y="188" fill="#a96a12">Zone A · 에이전트 영역</text>
+<text class="zs" x="238" y="188" fill="#a96a12">LLM 이 판단하는 유일한 곳 — 코드를 쓰거나 실행할 수 없다</text>
+
+<rect class="nd" x="50" y="204" width="250" height="90" fill="#fff" stroke="#d9b877" stroke-width="2.4"/>
+<text class="nt" x="175" y="231" fill="#14161c">main · recovery_lead</text>
+<text class="ns" x="175" y="251" fill="#69717f">담당자 · 질문 · 재계획</text>
+<text class="ns" x="175" y="268" fill="#69717f">종료 요청</text>
+<text class="ns" x="175" y="285" fill="#a96a12">성공을 확정할 수 없다</text>
+
+<!-- 위임 버스 -->
+<path class="e" d="M175,294 L175,320" stroke="#a96a12"/>
+<path class="e" d="M175,320 L1400,320" stroke="#a96a12"/>
+<text class="el" x="196" y="314" fill="#a96a12">task — 등록된 넷뿐 · 하위 재위임 불가</text>
+<path class="e" d="M230,320 L230,338" stroke="#a96a12" marker-end="url(#aA)"/>
+<path class="e" d="M620,320 L620,338" stroke="#a96a12" marker-end="url(#aA)"/>
+<path class="e" d="M1010,320 L1010,338" stroke="#a96a12" marker-end="url(#aA)"/>
+<path class="e" d="M1400,320 L1400,338" stroke="#a96a12" marker-end="url(#aA)"/>
+
+<rect class="nd" x="50" y="340" width="360" height="74" fill="#fff" stroke="#e8d2a6"/>
+<text class="nt" x="230" y="366" fill="#14161c">spec_researcher</text>
+<text class="ns" x="230" y="386" fill="#69717f">공식 명세 · 응답 구조 · 오류 구별</text>
+<text class="ns" x="230" y="403" fill="#69717f">샌드박스도 코드도 못 만진다</text>
+
+<rect class="nd" x="440" y="340" width="360" height="74" fill="#fff" stroke="#e8d2a6"/>
+<text class="nt" x="620" y="366" fill="#14161c">runtime_diagnostician</text>
+<text class="ns" x="620" y="386" fill="#69717f">어디서 왜 실패·손실이 생기는지</text>
+<text class="ns" x="620" y="403" fill="#69717f">관측으로 좁힌다</text>
+
+<rect class="nd" x="830" y="340" width="360" height="74" fill="#fff" stroke="#e8d2a6"/>
+<text class="nt" x="1010" y="366" fill="#14161c">repair_engineer</text>
+<text class="ns" x="1010" y="386" fill="#a96a12">이 역할만 코드를 바꾼다</text>
+<text class="ns" x="1010" y="403" fill="#69717f">최대 2버전 · 원본은 불변</text>
+
+<rect class="nd" x="1220" y="340" width="360" height="74" fill="#fff" stroke="#e8d2a6"/>
+<text class="nt" x="1400" y="366" fill="#14161c">data_auditor</text>
+<text class="ns" x="1400" y="386" fill="#69717f">수리 설명 없이 독립적으로</text>
+<text class="ns" x="1400" y="403" fill="#69717f">데이터 손실 조사</text>
+
+<!-- 경계 띠 -->
+<path class="e" d="M190,130 L190,158" stroke="#69717f" marker-end="url(#a)"/>
+<text class="el" x="202" y="149" fill="#69717f">명령 · 파일경로</text>
+
+<path class="ex" d="M300,430 L300,500" stroke="#a96a12" marker-end="url(#aA)"/>
+<text class="el" x="314" y="454" fill="#a96a12">도구 호출 9종</text>
+<text class="el" x="314" y="472" fill="#a96a12">다른 길이 없다</text>
+
+<path class="ed" d="M700,430 L700,500" stroke="#a96a12" marker-end="url(#aA)"/>
+<text class="el" x="714" y="463" fill="#a96a12">모든 추론</text>
+
+<path class="e" d="M110,500 L110,298" stroke="#2f5fb8" marker-end="url(#aT)"/>
+<text class="el" x="124" y="463" fill="#2f5fb8">작업 봉투 발급</text>
+
+<!-- 차단 안내 -->
+<rect x="880" y="440" width="730" height="54" rx="9" ry="9" fill="#fdefee" stroke="#eec4c0" stroke-width="1.5"/>
+<circle cx="912" cy="467" r="13" fill="#fff" stroke="#b13636" stroke-width="2"/>
+<line x1="906" y1="461" x2="918" y2="473" stroke="#b13636" stroke-width="2.2"/>
+<line x1="918" y1="461" x2="906" y2="473" stroke="#b13636" stroke-width="2.2"/>
+<text class="bl" x="938" y="463" fill="#b13636">에이전트는 기대값 · API key · 호스트 셸 · 파일시스템에 닿을 수 없다</text>
+<text class="bl" x="938" y="482" fill="#b13636">그런 도구가 애초에 발급되지 않는다 — 프롬프트로 막는 것이 아니다</text>
+
+<!-- Zone T -->
+<rect class="zb" x="30" y="500" width="1580" height="296" fill="#eef3fc" stroke="#b9cdec"/>
+<text class="zl" x="50" y="526" fill="#2f5fb8">Zone T · 신뢰 영역</text>
+<text class="zs" x="196" y="526" fill="#2f5fb8">LLM 없음 — 여기서 내린 판정만 최종이다</text>
+
+<rect class="nd" x="50" y="540" width="240" height="66" fill="#fff" stroke="#b9cdec"/>
+<text class="nt" x="170" y="565" fill="#14161c">LangGraph 런타임</text>
+<text class="ns" x="170" y="584" fill="#69717f">stage · 취소 · 중단</text>
+<text class="ns" x="170" y="599" fill="#69717f">작업 봉투 발급</text>
+
+<rect class="nd" x="320" y="540" width="240" height="66" fill="#fff" stroke="#8fb0e2" stroke-width="2.4"/>
+<text class="nt" x="440" y="565" fill="#14161c">도구 게이트웨이</text>
+<text class="ns" x="440" y="584" fill="#2f5fb8">역할 인가 · hash 검사</text>
+<text class="ns" x="440" y="599" fill="#69717f">9종 도구의 유일한 통로</text>
+
+<rect class="nd" x="590" y="540" width="240" height="66" fill="#fff" stroke="#8fb0e2" stroke-width="2.4"/>
+<text class="nt" x="710" y="565" fill="#14161c">모델 게이트웨이</text>
+<text class="ns" x="710" y="584" fill="#2f5fb8">LLM 호출의 단일 통로</text>
+<text class="ns" x="710" y="599" fill="#69717f">재시도 · 요약까지 계측</text>
+
+<rect class="nd" x="860" y="540" width="210" height="66" fill="#fff" stroke="#b9cdec"/>
+<text class="nt" x="965" y="565" fill="#14161c">예산 원장</text>
+<text class="ns" x="965" y="584" fill="#69717f">호출 · 토큰 · 시간</text>
+<text class="ns" x="965" y="599" fill="#69717f">역할 간 양도 없음</text>
+
+<rect class="nd" x="1100" y="540" width="220" height="66" fill="#fff" stroke="#b9cdec"/>
+<text class="nt" x="1210" y="565" fill="#14161c">사건 기록</text>
+<text class="ns" x="1210" y="584" fill="#69717f">events.jsonl</text>
+<text class="ns" x="1210" y="599" fill="#69717f">재생의 유일한 원천</text>
+
+<rect class="nd" x="1350" y="540" width="230" height="66" fill="#fff" stroke="#b9cdec"/>
+<text class="nt" x="1465" y="565" fill="#14161c">데이터 브로커</text>
+<text class="ns" x="1465" y="584" fill="#69717f">API key 보유</text>
+<text class="ns" x="1465" y="599" fill="#69717f">동결분만 반환</text>
+
+<rect class="nd" x="50" y="656" width="280" height="90" fill="#fff" stroke="#b9cdec"/>
+<text class="nt" x="190" y="682" fill="#14161c">레지스트리</text>
+<text class="ns" x="190" y="702" fill="#69717f">계약 · probe catalog · 스킬</text>
+<text class="ns" x="190" y="722" fill="#2f5fb8">기대값 (0600 · 봉인)</text>
+
+<rect class="nd" x="360" y="656" width="280" height="90" fill="#fff" stroke="#2f5fb8" stroke-width="3"/>
+<text class="nt" x="500" y="682" fill="#14161c">고정 검증기</text>
+<text class="ns" x="500" y="702" fill="#2f5fb8">실행 · 필드 · 값 · 전체성</text>
+<text class="ns" x="500" y="722" fill="#69717f">매번 넷 모두 검사</text>
+
+<rect class="nd" x="670" y="656" width="340" height="90" fill="#fff" stroke="#2f5fb8" stroke-width="3"/>
+<text class="nt" x="840" y="680" fill="#14161c">종료 게이트 · 우회 불가</text>
+<text class="ns" x="840" y="700" fill="#69717f">① 강제중단 ② 고정검증 ③ 감사완료 ④ 미해결 없음</text>
+<text class="ns" x="840" y="720" fill="#2f5fb8">LLM 출력을 인자로 받지 않는다</text>
+
+<rect class="nd" x="1040" y="656" width="200" height="90" fill="#fff" stroke="#b9cdec"/>
+<text class="nt" x="1140" y="690" fill="#14161c">최종 상태</text>
+<text class="ns" x="1140" y="710" fill="#1f7a4d">verified_repaired</text>
+<text class="ns" x="1140" y="727" fill="#69717f">외 9종</text>
+
+<rect class="nd" x="1270" y="656" width="310" height="90" fill="#fff" stroke="#b9cdec"/>
+<text class="nt" x="1425" y="682" fill="#14161c">신뢰 수집기</text>
+<text class="ns" x="1425" y="702" fill="#69717f">독립 수집 후 freeze</text>
+<text class="ns" x="1425" y="722" fill="#69717f">전체성 확정 못 하면 보류</text>
+
+<path class="e" d="M190,746 L190,768 L500,768 L500,750" stroke="#2f5fb8" marker-end="url(#aT)"/>
+<text class="el" x="212" y="764" fill="#2f5fb8">기대값 · 읽기 전용</text>
+<path class="e" d="M640,700 L666,700" stroke="#2f5fb8" marker-end="url(#aT)"/>
+<path class="e" d="M1010,700 L1036,700" stroke="#2f5fb8" marker-end="url(#aT)"/>
+<path class="e" d="M440,606 L440,652" stroke="#2f5fb8" marker-end="url(#aT)"/>
+<path class="e" d="M830,573 L856,573" stroke="#69717f" marker-end="url(#a)"/>
+<path class="e" d="M560,573 L586,573" stroke="#69717f" marker-end="url(#a)"/>
+<text class="el" x="862" y="632" fill="#69717f">도구·모델 호출의 모든 소비가 이 원장 하나에 기록된다</text>
+<path class="e" d="M1465,606 L1465,652" stroke="#69717f" marker-end="url(#a)"/>
+
+<!-- Zone S -->
+<rect class="zb" x="30" y="828" width="1580" height="156" fill="#fdefee" stroke="#eec4c0"/>
+<text class="zl" x="50" y="854" fill="#b13636">Zone S · 실행 영역</text>
+<text class="zs" x="196" y="854" fill="#b13636">네트워크 없음 · 읽기 전용 rootfs · 비특권 사용자 · 호스트 실행 경로 없음</text>
+
+<rect class="nd" x="50" y="870" width="290" height="92" fill="#fff" stroke="#eec4c0"/>
+<text class="nt" x="195" y="896" fill="#14161c">샌드박스 backend</text>
+<text class="ns" x="195" y="916" fill="#69717f">OpenShell 우선 · 컨테이너 대안</text>
+<text class="ns" x="195" y="936" fill="#b13636">경계 자가검사 5종 통과 후에만</text>
+<text class="ns" x="195" y="953" fill="#69717f">후보를 실행한다</text>
+
+<rect class="nd" x="380" y="870" width="290" height="92" fill="#fff" stroke="#eec4c0"/>
+<text class="nt" x="525" y="902" fill="#14161c">candidate.py</text>
+<text class="ns" x="525" y="924" fill="#69717f">fetch_records(http, query)</text>
+<text class="ns" x="525" y="944" fill="#69717f">소켓을 얻지 못한다</text>
+
+<path class="e" d="M340,916 L376,916" stroke="#b13636" marker-end="url(#aS)"/>
+<path class="ex" d="M670,900 L1460,900 L1460,750" stroke="#b13636" marker-start="url(#aS)" marker-end="url(#aS)"/>
+<text class="el" x="700" y="890" fill="#b13636">JSONL IPC · 요청/응답 2종뿐 · 동결 스냅샷만 해소한다</text>
+
+<path class="e" d="M400,746 L400,812 L195,812 L195,866" stroke="#2f5fb8" marker-end="url(#aT)"/>
+<text class="el" x="412" y="808" fill="#2f5fb8">후보 실행 · 예산 차감 후</text>
+
+<!-- 하단 -->
+<text x="30" y="1026" font-family="'IBM Plex Sans KR',sans-serif" font-size="14.5" font-weight="600" fill="#14161c">경계를 만드는 것은 프롬프트가 아니다</text>
+<text x="30" y="1050" font-family="'IBM Plex Mono',monospace" font-size="12.5" fill="#39404e">권한은 실행 컨텍스트에서 나온다 — 모델이 인자로 agent_id 를 위조해도 무시된다 · 도구는 역할별로 바인딩된 클로저로 발급된다</text>
+<text x="30" y="1072" font-family="'IBM Plex Mono',monospace" font-size="12.5" fill="#39404e">verify/ 는 agents/ 를 import 하지 않는다 — CI 가 AST 로 검사한다 · 기대값은 어떤 역할도 읽을 수 없다</text>
+<text x="30" y="1094" font-family="'IBM Plex Mono',monospace" font-size="12.5" fill="#39404e">종료 게이트의 판정 함수 시그니처는 (session, candidate_hash, final_verdict) 뿐이다 — 모델의 주장이 들어갈 자리가 없다</text>
+</svg>

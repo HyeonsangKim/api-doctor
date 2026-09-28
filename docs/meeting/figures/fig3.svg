@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 700" role="img" aria-labelledby="t3 d3">
+<title id="t3">종료 게이트의 네 단계 판정</title>
+<desc id="d3">게이트는 강제 중단 여부, 현재 후보의 고정 검증, 현재 후보의 감사 완료, 미해결 항목 순으로 검사한다. 순서가 곧 우선순위이며, 어느 단계에서 걸리든 성공으로 승격되지 않는다.</desc>
+<style>
+.bx{rx:8;ry:8;stroke-width:1.5}
+.q{font:600 13.5px "IBM Plex Sans KR",sans-serif;text-anchor:middle}
+.qs{font:400 11px "IBM Plex Mono",monospace;text-anchor:middle}
+.e{fill:none;stroke-width:1.8}
+.el{font:500 11.5px "IBM Plex Mono",monospace}
+</style>
+<defs>
+<marker id="k" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2f5fb8"/></marker>
+<marker id="kb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#b13636"/></marker>
+<marker id="ko" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1f7a4d"/></marker>
+</defs>
+
+<rect class="bx" x="40" y="30" width="420" height="52" fill="#f4f5f8" stroke="#c9cfda"/>
+<text class="q" x="250" y="52" fill="#14161c">게이트 진입</text>
+<text class="qs" x="250" y="70" fill="#69717f">main 종료 요청 · 텍스트 종료 · agent 예외 · 루프 상한</text>
+
+<!-- 1 -->
+<rect class="bx" x="40" y="118" width="420" height="64" fill="#fff" stroke="#2f5fb8" stroke-width="2"/>
+<text class="q" x="250" y="144" fill="#14161c">① 강제 중단이 있었나</text>
+<text class="qs" x="250" y="165" fill="#69717f">취소 · 예산 소진 · 정책 차단</text>
+<path class="e" d="M250,82 L250,114" stroke="#2f5fb8" marker-end="url(#k)"/>
+
+<rect class="bx" x="560" y="118" width="600" height="64" fill="#fdefee" stroke="#eec4c0"/>
+<text class="q" x="860" y="144" fill="#14161c">그 중단 상태로 확정 — 승계 불가</text>
+<text class="qs" x="860" y="165" fill="#b13636">완료된 검사가 있어도 verified 로 승격하지 않고 새 코드도 실행하지 않는다</text>
+<path class="e" d="M460,150 L556,150" stroke="#b13636" marker-end="url(#kb)"/>
+<text class="el" x="482" y="142" fill="#b13636">있다</text>
+
+<!-- 2 -->
+<rect class="bx" x="40" y="222" width="420" height="64" fill="#fff" stroke="#2f5fb8" stroke-width="2"/>
+<text class="q" x="250" y="248" fill="#14161c">② 현재 hash 의 고정 검증을 통과했나</text>
+<text class="qs" x="250" y="269" fill="#69717f">실행 · 필드 · 값 · 전체성 네 검사</text>
+<path class="e" d="M250,182 L250,218" stroke="#2f5fb8" marker-end="url(#k)"/>
+<text class="el" x="262" y="206" fill="#2f5fb8">없다</text>
+
+<rect class="bx" x="560" y="222" width="600" height="64" fill="#fdefee" stroke="#eec4c0"/>
+<text class="q" x="860" y="248" fill="#14161c">verification_failed 또는 inconclusive</text>
+<text class="qs" x="860" y="269" fill="#b13636">다른 후보의 검증 결과를 재사용하면 STALE — 3-hash 가 어긋나면 조회가 실패한다</text>
+<path class="e" d="M460,254 L556,254" stroke="#b13636" marker-end="url(#kb)"/>
+<text class="el" x="482" y="246" fill="#b13636">실패</text>
+
+<!-- 3 -->
+<rect class="bx" x="40" y="326" width="420" height="64" fill="#fff" stroke="#2f5fb8" stroke-width="2"/>
+<text class="q" x="250" y="352" fill="#14161c">③ 현재 hash 의 감사가 완료됐나</text>
+<text class="qs" x="250" y="373" fill="#69717f">실행된 probe 와 고정 coverage 로만 판정</text>
+<path class="e" d="M250,286 L250,322" stroke="#2f5fb8" marker-end="url(#k)"/>
+<text class="el" x="262" y="310" fill="#2f5fb8">통과</text>
+
+<rect class="bx" x="560" y="326" width="600" height="64" fill="#fdf4e3" stroke="#e8d2a6"/>
+<text class="q" x="860" y="352" fill="#14161c">MISSING_AUDIT — main 으로 되돌려보낸다</text>
+<text class="qs" x="860" y="373" fill="#8a6100">모델의 찬성 문구는 입력이 아니다 · baseline 과 다른 probe 를 실제로 돌려야 한다</text>
+<path class="e" d="M460,358 L556,358" stroke="#b13636" marker-end="url(#kb)"/>
+<text class="el" x="482" y="350" fill="#b13636">미흡</text>
+
+<!-- 4 -->
+<rect class="bx" x="40" y="430" width="420" height="64" fill="#fff" stroke="#2f5fb8" stroke-width="2"/>
+<text class="q" x="250" y="456" fill="#14161c">④ 계약 관련 미해결 항목이 없나</text>
+<text class="qs" x="250" y="477" fill="#69717f">issue · inconclusive 결론이 남아 있는가</text>
+<path class="e" d="M250,390 L250,426" stroke="#2f5fb8" marker-end="url(#k)"/>
+<text class="el" x="262" y="414" fill="#2f5fb8">완료</text>
+
+<rect class="bx" x="560" y="430" width="600" height="64" fill="#fdf4e3" stroke="#e8d2a6"/>
+<text class="q" x="860" y="456" fill="#14161c">verification_inconclusive</text>
+<text class="qs" x="860" y="477" fill="#8a6100">해소하려면 새 probe 의 검사 결과가 필요하다 · main 동의로 덮을 수 없다</text>
+<path class="e" d="M460,462 L556,462" stroke="#b13636" marker-end="url(#kb)"/>
+<text class="el" x="482" y="454" fill="#b13636">있다</text>
+
+<!-- 성공 -->
+<rect class="bx" x="40" y="534" width="420" height="66" fill="#eef7f1" stroke="#1f7a4d" stroke-width="2.4"/>
+<text class="q" x="250" y="562" fill="#14161c">verified_repaired</text>
+<text class="qs" x="250" y="583" fill="#1f7a4d">네 조건을 모두 만족할 때만 도달한다</text>
+<path class="e" d="M250,494 L250,530" stroke="#1f7a4d" marker-end="url(#ko)"/>
+<text class="el" x="262" y="518" fill="#1f7a4d">없다</text>
+
+<!-- 코드 -->
+<rect x="560" y="534" width="600" height="126" rx="8" ry="8" fill="#f4f6fa" stroke="#dfe2e9"/>
+<text x="580" y="558" font-family="'IBM Plex Sans KR',sans-serif" font-size="12.5" font-weight="600" fill="#14161c">판정 함수에는 모델의 주장이 들어갈 자리가 없다</text>
+<text x="580" y="582" font-family="'IBM Plex Mono',monospace" font-size="11.5" fill="#39404e">def evaluate(session, candidate_hash, final_verdict) -&gt; FinalStatus:</text>
+<text x="580" y="602" font-family="'IBM Plex Mono',monospace" font-size="11.5" fill="#39404e">    if session.forced_halt:        return session.forced_halt.status</text>
+<text x="580" y="620" font-family="'IBM Plex Mono',monospace" font-size="11.5" fill="#39404e">    if not fixed_check_passed(...): return VERIFICATION_FAILED</text>
+<text x="580" y="638" font-family="'IBM Plex Mono',monospace" font-size="11.5" fill="#39404e">    if not audit_complete(...):     return MISSING_AUDIT</text>
+<text x="580" y="656" font-family="'IBM Plex Mono',monospace" font-size="11.5" fill="#39404e">    if unresolved(...):             return VERIFICATION_INCONCLUSIVE</text>
+</svg>

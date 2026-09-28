@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 640" role="img" aria-labelledby="t4 d4">
+<title id="t4">감사 독립성은 어떻게 만들어지나</title>
+<desc id="d4">런타임이 감사자에게 중립 작업 봉투를 새로 조립한다. 수리자의 설명과 메인의 대화는 전달되지 않고, 기대값은 어떤 역할도 읽을 수 없다. 감사자는 설명을 믿는 대신 직접 probe 를 돌려 관측해야 한다.</desc>
+<style>
+.bx{rx:8;ry:8;stroke-width:1.5}
+.h{font:600 13.5px "IBM Plex Sans KR",sans-serif}
+.i{font:400 12.5px "IBM Plex Sans KR",sans-serif}
+.m{font:400 11.5px "IBM Plex Mono",monospace}
+.e{fill:none;stroke-width:1.8}
+.el{font:500 11.5px "IBM Plex Mono",monospace}
+</style>
+<defs>
+<marker id="p" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2f5fb8"/></marker>
+</defs>
+
+<!-- 존재하는 자료 -->
+<rect class="bx" x="30" y="60" width="380" height="344" fill="#f4f5f8" stroke="#c9cfda"/>
+<text class="h" x="52" y="88" fill="#39404e">세션에 존재하는 자료</text>
+
+<rect class="bx" x="52" y="106" width="336" height="40" fill="#fff" stroke="#dfe2e9"/>
+<text class="i" x="70" y="131" fill="#14161c">수리자가 남긴 설명 · 근거 서술</text>
+
+<rect class="bx" x="52" y="156" width="336" height="40" fill="#fff" stroke="#dfe2e9"/>
+<text class="i" x="70" y="181" fill="#14161c">main 의 전체 대화 · 계획 텍스트</text>
+
+<rect class="bx" x="52" y="206" width="336" height="40" fill="#fff" stroke="#dfe2e9"/>
+<text class="i" x="70" y="231" fill="#14161c">도구가 기록한 관측 (observation)</text>
+
+<rect class="bx" x="52" y="256" width="336" height="40" fill="#fff" stroke="#dfe2e9"/>
+<text class="i" x="70" y="281" fill="#14161c">계약의 중립 요약 · 현재 후보 코드</text>
+
+<rect class="bx" x="52" y="306" width="336" height="40" fill="#fff" stroke="#dfe2e9"/>
+<text class="i" x="70" y="331" fill="#14161c">기대값 · 정답 (registry/expected)</text>
+
+<!-- 런타임 -->
+<rect class="bx" x="470" y="150" width="240" height="150" fill="#eef3fc" stroke="#2f5fb8" stroke-width="2.4"/>
+<text class="h" x="490" y="180" fill="#2f5fb8">런타임이 조립한다</text>
+<text class="m" x="490" y="206" fill="#39404e">build_envelope(</text>
+<text class="m" x="490" y="226" fill="#39404e">  agent_id=data_auditor)</text>
+<text class="i" x="490" y="254" fill="#14161c">가시성 매트릭스로</text>
+<text class="i" x="490" y="274" fill="#14161c">자료를 걸러 낸다</text>
+<text class="m" x="490" y="294" fill="#2f5fb8">objective 도 덮어쓴다</text>
+
+<path class="e" d="M410,126 L427,126" stroke="#b13636" stroke-dasharray="5 4"/>
+<path class="e" d="M410,176 L427,176" stroke="#b13636" stroke-dasharray="5 4"/>
+<path class="e" d="M410,226 L466,226" stroke="#2f5fb8" marker-end="url(#p)"/>
+<path class="e" d="M410,276 L444,276 L444,244 L466,244" stroke="#2f5fb8" marker-end="url(#p)"/>
+<path class="e" d="M410,326 L427,326" stroke="#b13636" stroke-dasharray="5 4"/>
+
+<!-- 차단 마크 -->
+<g>
+<circle cx="440" cy="126" r="11" fill="#fff" stroke="#b13636" stroke-width="2"/>
+<line x1="435" y1="121" x2="445" y2="131" stroke="#b13636" stroke-width="2"/>
+<line x1="445" y1="121" x2="435" y2="131" stroke="#b13636" stroke-width="2"/>
+</g>
+<g>
+<circle cx="440" cy="176" r="11" fill="#fff" stroke="#b13636" stroke-width="2"/>
+<line x1="435" y1="171" x2="445" y2="181" stroke="#b13636" stroke-width="2"/>
+<line x1="445" y1="171" x2="435" y2="181" stroke="#b13636" stroke-width="2"/>
+</g>
+<g>
+<circle cx="440" cy="326" r="11" fill="#fff" stroke="#b13636" stroke-width="2"/>
+<line x1="435" y1="321" x2="445" y2="331" stroke="#b13636" stroke-width="2"/>
+<line x1="445" y1="321" x2="435" y2="331" stroke="#b13636" stroke-width="2"/>
+</g>
+
+<!-- 감사자가 받는 것 -->
+<rect class="bx" x="780" y="60" width="380" height="344" fill="#fdf5e8" stroke="#e8d2a6"/>
+<text class="h" x="802" y="88" fill="#a96a12">data_auditor 가 실제로 받는 것</text>
+
+<rect class="bx" x="802" y="106" width="336" height="46" fill="#fff" stroke="#e8d2a6"/>
+<text class="i" x="820" y="127" fill="#14161c">고정 템플릿으로 다시 쓴 objective</text>
+<text class="m" x="820" y="145" fill="#a96a12">main 이 쓴 문장은 버려진다</text>
+
+<rect class="bx" x="802" y="162" width="336" height="46" fill="#fff" stroke="#e8d2a6"/>
+<text class="i" x="820" y="183" fill="#14161c">계약의 중립 요약</text>
+<text class="m" x="820" y="201" fill="#69717f">필수 필드 · 식별키 · 위험 영역</text>
+
+<rect class="bx" x="802" y="218" width="336" height="46" fill="#fff" stroke="#e8d2a6"/>
+<text class="i" x="820" y="239" fill="#14161c">관측 증거 (observation 만)</text>
+<text class="m" x="820" y="257" fill="#69717f">모델의 주장은 넘기지 않는다</text>
+
+<rect class="bx" x="802" y="274" width="336" height="58" fill="#fff" stroke="#e8d2a6"/>
+<text class="i" x="820" y="294" fill="#14161c">허용된 probe 목록</text>
+<text class="m" x="820" y="312" fill="#69717f">page_partition · range_coverage</text>
+<text class="m" x="820" y="327" fill="#69717f">field_presence</text>
+
+<rect class="bx" x="802" y="342" width="336" height="44" fill="#fff" stroke="#e8d2a6"/>
+<text class="i" x="820" y="362" fill="#14161c">현재 후보 코드</text>
+<text class="m" x="820" y="379" fill="#69717f">어떻게 고쳤는지는 알려주지 않는다</text>
+
+<path class="e" d="M714,225 L776,225" stroke="#2f5fb8" marker-end="url(#p)"/>
+<text class="el" x="718" y="216" fill="#2f5fb8">중립 봉투</text>
+
+<!-- 결론 -->
+<rect class="bx" x="1200" y="150" width="270" height="150" fill="#eef7f1" stroke="#1f7a4d" stroke-width="2"/>
+<text class="h" x="1220" y="180" fill="#1f7a4d">그래서 감사자는</text>
+<text class="i" x="1220" y="208" fill="#14161c">설명을 믿을 수 없다.</text>
+<text class="i" x="1220" y="232" fill="#14161c">직접 probe 를 돌려</text>
+<text class="i" x="1220" y="256" fill="#14161c">관측해야 결론을 낼 수 있다.</text>
+<text class="m" x="1220" y="282" fill="#1f7a4d">probe 없는 &quot;문제 없음&quot; 은 거절</text>
+<path class="e" d="M1164,225 L1196,225" stroke="#1f7a4d" marker-end="url(#p)"/>
+
+<!-- 하단 -->
+<text x="30" y="440" font-family="'IBM Plex Sans KR',sans-serif" font-size="13.5" font-weight="600" fill="#14161c">독립성은 "다른 모델" 이 아니다</text>
+<text x="30" y="466" font-family="'IBM Plex Mono',monospace" font-size="12" fill="#39404e">감사자도 같은 무료 모델을 쓴다. 독립성은 입력을 다르게 주는 것으로 만들며, 증거 저장소의 visibility 필드가 이를 강제한다.</text>
+<text x="30" y="490" font-family="'IBM Plex Mono',monospace" font-size="12" fill="#39404e">같은 모델의 상관된 실수는 여전히 가능하다 — 그것을 고정 검증기가 보완한다. 감사는 검증을 대신하지 않고 보태는 것이다.</text>
+<text x="30" y="520" font-family="'IBM Plex Sans KR',sans-serif" font-size="13.5" font-weight="600" fill="#14161c">감사가 완료되려면</text>
+<text x="30" y="546" font-family="'IBM Plex Mono',monospace" font-size="12" fill="#39404e">· 계약의 필수 위험 영역을 probe catalog 의 고정 coverage 로 전부 덮어야 한다</text>
+<text x="30" y="568" font-family="'IBM Plex Mono',monospace" font-size="12" fill="#39404e">· baseline 과 다른 probe 를 현재 candidate_hash + snapshot_hash 에서 실제로 실행해야 한다</text>
+<text x="30" y="590" font-family="'IBM Plex Mono',monospace" font-size="12" fill="#39404e">· 각 영역마다 가설 · 불변식 · probe_result_id · 결론을 채워야 한다 — 빈 findings 는 완료가 아니다</text>
+<text x="30" y="612" font-family="'IBM Plex Mono',monospace" font-size="12" fill="#39404e">· 0건짜리 후보의 공허한 성립(VACUOUS)은 위험 영역을 덮은 것으로 세지 않는다</text>
+</svg>
