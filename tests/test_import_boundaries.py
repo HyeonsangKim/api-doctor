@@ -15,6 +15,11 @@ FORBIDDEN: list[tuple[str, tuple[str, ...], str]] = [
     ("verify", ("agents", "tools", "model"), "고정 검증기는 모델 판단과 분리된다 (PRD §3.2)"),
     ("model", ("agents", "tools", "verify", "sandbox"), "모델 게이트웨이는 예산 외에 아무것도 모른다"),
     ("sandbox", ("agents", "model", "verify"), "Zone S 는 Zone A 를 모른다"),
+    # 평가용 비공개 기대값은 제품 코드 어디에서도 닿으면 안 된다.
+    ("agents", ("evaluation",), "에이전트가 평가용 비공개 기대값에 닿으면 안 된다 (PRD §7.1 b)"),
+    ("tools", ("evaluation",), "도구가 평가용 비공개 기대값에 닿으면 안 된다"),
+    ("verify", ("evaluation",), "제품의 고정 검증과 평가용 세트는 분리된다"),
+    ("runtime", ("evaluation",), "런타임이 평가 세트를 알면 안 된다"),
 ]
 
 
@@ -77,6 +82,22 @@ def test_harness_is_stdlib_only() -> None:
             names.update(a.name for a in node.names)
     leaked = {n for n in names if n.startswith("api_doctor")}
     assert not leaked, f"하네스가 패키지를 import 합니다: {leaked}"
+
+
+def test_hidden_expectations_are_unreachable_from_product_code() -> None:
+    """평가용 비공개 기대값 파일을 제품 코드가 직접 읽지 않는다.
+
+    PRD §7.1 b: 평가용 입력·기대값은 팀 전체에 숨긴다. 코드가 경로를
+    알고 있으면 언젠가 새어 나간다.
+    """
+    offenders: list[str] = []
+    for file in sorted(SRC.rglob("*.py")):
+        if file.relative_to(SRC).parts[0] == "evaluation":
+            continue
+        text = file.read_text(encoding="utf-8")
+        if "hidden.json" in text or "eval/hidden" in text:
+            offenders.append(str(file.relative_to(SRC)))
+    assert not offenders, f"제품 코드가 비공개 기대값 경로를 안다: {offenders}"
 
 
 def test_no_host_backend_exists() -> None:
