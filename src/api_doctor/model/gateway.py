@@ -18,6 +18,8 @@ from typing import Any, Callable, Iterator, Protocol
 from ..runtime.budget import BudgetExceeded, BudgetLedger, Cancelled
 
 NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
+# 일시 오류 재시도 횟수. 실패는 환불되므로 시간 예산이 실질 한계다.
+MAX_TRANSIENT_RETRIES = 3
 DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b"
 
 
@@ -46,6 +48,9 @@ class ModelCall:
     output_tokens: int | None
     latency_ms: int
     tokens_kind: str
+    # 추론 모델의 관측용. 예산은 completion_tokens 로 정산한다.
+    reasoning_chars: int = 0
+    finish_reason: str = ""
     error: str | None = None
     retry_of: int | None = None
     # run 시작 기준 상대 시각(ms). Gantt 와 구간 대조에 쓴다 (FR-018).
@@ -66,6 +71,8 @@ class ModelCall:
             "total_tokens": self.total_tokens,
             "latency_ms": self.latency_ms,
             "tokens_kind": self.tokens_kind,
+            "reasoning_chars": self.reasoning_chars,
+            "finish_reason": self.finish_reason,
             "error": self.error,
             "retry_of": self.retry_of,
             "started_ms": self.started_ms,
@@ -113,23 +120,44 @@ class ModelGateway:
     ) -> str:
         """1회 추론. 예산 초과·취소는 예외로 올린다.
 
-        일시 오류 재시도는 같은 역할·전체 한도 안 최대 1회이며 (PRD §4.1),
-        재시도도 새 호출로 계측한다.
+        일시 오류 재시도는 전부 계측된다 (PRD §4.1). 다만 공급자가 본문도
+        usage 도 주지 않은 실패는 모델 작업이 아니므로 호출 허용량을 환불한다.
         """
         self.ledger.cancel.raise_if_cancelled()
-        attempt = self._attempt(agent_id, messages, retry_of=None)
-        if attempt[1] is None:
-            return attempt[0]
 
-        error = attempt[1]
+        text, error = self._attempt(agent_id, messages, retry_of=None)
+        if error is None:
+            return text
+
         if not allow_retry or not _is_transient(error):
             raise ModelUnavailable(error)
 
-        # 재시도도 동일 예산을 소비한다.
-        retry = self._attempt(agent_id, messages, retry_of=len(self.calls))
-        if retry[1] is not None:
-            raise ModelUnavailable(retry[1])
-        return retry[0]
+        # 재시도 전에 물러선다. 같은 간격으로 즉시 다시 던지면 같은 503 이 온다.
+        # 공급자 실패는 호출 예산에서 환불되므로(§refund_failed_call) 여기서
+        # 몇 번 더 시도해도 조사 예산을 태우지 않는다. 실질 한계는 시간 예산이다.
+        for retry_index in range(MAX_TRANSIENT_RETRIES):
+            if self.ledger.provider_failures_exhausted:
+                raise ModelUnavailable(
+                    f"공급자 실패가 {self.ledger.failed_attempts}회 누적되어 "
+                    f"중단합니다: {error}"
+                )
+            delay = min(
+                2.0 * (retry_index + 1),
+                max(0.0, self.ledger.usable_seconds - self.config.timeout_seconds),
+            )
+            if delay > 0:
+                self.ledger.cancel.wait(delay)
+            self.ledger.cancel.raise_if_cancelled()
+
+            text, error = self._attempt(
+                agent_id, messages, retry_of=len(self.calls)
+            )
+            if error is None:
+                return text
+            if not _is_transient(error):
+                break
+
+        raise ModelUnavailable(error)
 
     def _attempt(
         self, agent_id: str, messages: list[dict[str, Any]], *, retry_of: int | None
@@ -156,10 +184,27 @@ class ModelGateway:
             error = f"{type(exc).__name__}: {exc}"
 
         latency_ms = int((time.monotonic() - started) * 1000)
+
+        # 공급자가 본문도 usage 도 주지 않은 실패는 모델 작업이 아니다.
+        # 원장에 시도로 남기되 호출 허용량은 돌려준다.
+        if error is not None and usage is None:
+            self.ledger.refund_failed_call(reservation)
+            call = ModelCall(
+                agent_id=agent_id, input_tokens=None, output_tokens=None,
+                latency_ms=latency_ms, tokens_kind="failed", error=error,
+                retry_of=retry_of, started_ms=started_ms,
+                ended_ms=int(self.ledger.elapsed * 1000),
+            )
+            self.calls.append(call)
+            if self.on_call is not None:
+                self.on_call(call)
+            return text, error
+
         total = None
         if usage is not None:
             total = int(usage.get("total_tokens") or
                         (usage.get("input_tokens", 0) + usage.get("output_tokens", 0)))
+            reasoning_chars = int(usage.get("reasoning_chars", 0))
         self.ledger.settle_model_call(reservation, usage_tokens=total)
 
         call = ModelCall(
@@ -167,6 +212,8 @@ class ModelGateway:
             input_tokens=(usage or {}).get("input_tokens"),
             output_tokens=(usage or {}).get("output_tokens"),
             latency_ms=latency_ms,
+            reasoning_chars=int((usage or {}).get("reasoning_chars", 0)),
+            finish_reason=str((usage or {}).get("finish_reason", "")),
             tokens_kind="actual" if usage is not None else "estimated",
             error=error,
             retry_of=retry_of,
@@ -181,7 +228,21 @@ class ModelGateway:
     # ------------------------------------------------------------------ 대조
 
     def per_role_calls(self) -> dict[str, int]:
-        """AC-16: 역할별 호출 수. NAT 프로파일러 csv 와 대조된다."""
+        """AC-16: 역할별 **과금된** 호출 수. 원장과 일치해야 한다.
+
+        공급자가 본문도 usage 도 주지 않은 시도는 환불되므로 여기서 뺀다.
+        그러지 않으면 프로파일과 원장이 어긋나 대조가 항상 실패한다.
+        시도 총량은 `per_role_attempts()` 로 따로 본다.
+        """
+        counts: dict[str, int] = {}
+        for call in self.calls:
+            if call.tokens_kind == "failed":
+                continue
+            counts[call.agent_id] = counts.get(call.agent_id, 0) + 1
+        return counts
+
+    def per_role_attempts(self) -> dict[str, int]:
+        """공급자 실패를 포함한 시도 수. 관측용이다."""
         counts: dict[str, int] = {}
         for call in self.calls:
             counts[call.agent_id] = counts.get(call.agent_id, 0) + 1
@@ -260,13 +321,39 @@ class NvidiaChatBackend:
         )
         response.raise_for_status()
         data = response.json()
-        text = data["choices"][0]["message"]["content"] or ""
+        choice = data["choices"][0]
+        message = choice.get("message") or {}
+        text = message.get("content") or ""
+        finish = str(choice.get("finish_reason", ""))
+
+        # 이 모델은 reasoning 모델이다. 추론은 `reasoning_content` 로 따로 오고
+        # `completion_tokens` 에 함께 계산된다. 추론이 max_tokens 를 다 쓰면
+        # content 가 비어 온다 — 빈 문자열을 정상 응답처럼 돌려주면
+        # 상위에서 "형식 위반" 으로 오인하므로 여기서 구분해 올린다.
+        reasoning = message.get("reasoning_content") or ""
+
+        # 잘린 응답은 정상 응답이 아니다. 그대로 올리면 상위에서
+        # "형식 위반" 으로 오인하고 조사가 조용히 끝난다.
+        if finish == "length":
+            raise ModelUnavailable(
+                f"출력이 상한 {max_tokens} 토큰에서 잘렸습니다 "
+                f"(본문 {len(text)}자, 추론 {len(reasoning)}자). "
+                "출력 상한을 올리거나 더 짧게 쓰도록 지시해야 합니다."
+            )
+        if not text.strip() and reasoning:
+            raise ModelUnavailable(
+                "모델이 추론만 반환하고 본문을 내지 않았습니다."
+            )
+
         raw = data.get("usage") or {}
         usage = (
             {
                 "input_tokens": int(raw.get("prompt_tokens", 0)),
                 "output_tokens": int(raw.get("completion_tokens", 0)),
                 "total_tokens": int(raw.get("total_tokens", 0)),
+                # 관측용. 예산은 completion_tokens 로 정산한다.
+                "reasoning_chars": len(reasoning),
+                "finish_reason": finish,
             }
             if raw
             else None

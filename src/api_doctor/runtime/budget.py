@@ -135,8 +135,12 @@ class Limits:
 
     role_model_calls: dict[str, int] = field(
         default_factory=lambda: {
-            "main": 8, "spec_researcher": 4, "runtime_diagnostician": 4,
-            "repair_engineer": 4, "data_auditor": 4,
+            # 실측(2026-09-28) 후 조정. PRD §4.1 의 설계 상한은 역할당 4회였으나
+            # 한 번 돌려 보니 부족했다 — 도구 호출 1건이 모델 호출 1회를 쓰는데,
+            # 조사에 probe 2회가 필요하고 공급자 503 이 한 회를 더 먹었다.
+            # 전체 24회는 그대로이므로 총량이 여전히 실질 상한이다.
+            "main": 8, "spec_researcher": 5, "runtime_diagnostician": 6,
+            "repair_engineer": 6, "data_auditor": 6,
             # 비교 실험 B: 팀 전체와 **같은 총량**을 준다 (PRD §7.3).
             "single_agent": 24,
         }
@@ -145,12 +149,19 @@ class Limits:
 
     max_output_tokens: dict[str, int] = field(
         default_factory=lambda: {
-            "main": 2048, "spec_researcher": 2048, "runtime_diagnostician": 2048,
-            "data_auditor": 2048, "repair_engineer": 4096, "single_agent": 4096,
+            # 실측(2026-09-28): 이 모델은 reasoning 모델이라 추론이
+            # completion_tokens 를 함께 쓴다. 사소한 JSON 한 줄에도 출력 258
+            # 토큰이 나갔다. 패치를 싣는 역할은 특히 여유가 필요하다.
+            "main": 3072, "spec_researcher": 3072, "runtime_diagnostician": 3072,
+            "data_auditor": 3072, "repair_engineer": 12288, "single_agent": 12288,
         }
     )
     model_http_seconds: float = 45.0
     cleanup_seconds: float = 20.0
+    # 공급자가 본문 없이 실패한 시도의 총 허용량. 무한 재시도를 막되,
+    # 실측(2026-09-28) 결과 503 이 잦아 6회로는 조사 도중 끊긴다.
+    # 실패는 환불되므로 실질 한계는 전체 시간 예산이다.
+    max_provider_failures: int = 15
 
 
 @dataclass(slots=True)
@@ -180,6 +191,7 @@ class BudgetLedger:
     broker_calls: int = 0
     delegations: int = 0
     patches: int = 0
+    failed_attempts: int = 0
 
     role_calls: dict[str, int] = field(
         default_factory=lambda: dict.fromkeys((*AGENT_IDS, SINGLE_AGENT), 0)
@@ -359,6 +371,34 @@ class BudgetLedger:
         self._log("reserve", Resource.MODEL_CALLS, agent_id=agent_id, tokens=amount)
         return Reservation(agent_id=agent_id, tokens=amount)
 
+    def refund_failed_call(self, reservation: Reservation) -> None:
+        """공급자가 아무것도 반환하지 않은 호출을 환불한다.
+
+        503 처럼 본문도 usage 도 없는 실패는 **모델 작업이 아니다.**
+        원장에는 시도로 남기되(관측), 역할의 호출 허용량은 돌려준다.
+        그러지 않으면 공급자 불안정이 조사 예산을 대신 태운다.
+
+        무한 재시도를 막기 위해 실패 시도 총량은 따로 센다.
+        """
+        if reservation.settled:
+            return
+        reservation.settled = True
+        self.tokens_reserved = max(0, self.tokens_reserved - reservation.tokens)
+        self.model_calls = max(0, self.model_calls - 1)
+        self.role_calls[reservation.agent_id] = max(
+            0, self.role_calls.get(reservation.agent_id, 0) - 1
+        )
+        self.failed_attempts += 1
+        self._log(
+            "refund", Resource.MODEL_CALLS,
+            agent_id=reservation.agent_id, reason="provider_no_response",
+        )
+
+    @property
+    def provider_failures_exhausted(self) -> bool:
+        """공급자 실패가 너무 잦으면 중단한다."""
+        return self.failed_attempts >= self.limits.max_provider_failures
+
     def settle_model_call(
         self, reservation: Reservation, *, usage_tokens: int | None
     ) -> None:
@@ -452,6 +492,7 @@ class BudgetLedger:
             "broker_calls": self.broker_calls,
             "delegations": self.delegations,
             "patches": self.patches,
+            "provider_failures": self.failed_attempts,
             "per_role_calls": dict(self.role_calls),
             "cancelled": self.cancel.cancelled,
         }

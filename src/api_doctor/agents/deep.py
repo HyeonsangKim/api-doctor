@@ -35,11 +35,12 @@ from pydantic import BaseModel, create_model
 
 from ..model.chat import for_agent
 from ..model.gateway import ModelGateway
-from ..runtime.envelope import build_context, build_envelope
+from ..runtime.envelope import _AUDIT_PROBES, build_context, build_envelope
+from ..runtime.evidence import AUDIT
 from ..runtime.session import RunSession
 from ..tools.gateway import TOOL_ACL, Tool, ToolContext, ToolError, ToolGateway
 from .delegation_guard import DelegationGuard
-from .prompts import BY_AGENT
+from .prompts import BY_AGENT_DEEP
 
 DELEGATION_TARGETS = (
     "spec_researcher", "runtime_diagnostician", "repair_engineer", "data_auditor",
@@ -143,6 +144,90 @@ def _as_langchain_tools(
     return tools
 
 
+def _context_block(session: RunSession, agent_id: str) -> str:
+    """서브에이전트 프롬프트에 붙일 작업 맥락.
+
+    deepagents 는 서브에이전트에게 `task` 의 description 만 전달한다.
+    builtin 하네스가 envelope 로 주던 계약 요약·사용 가능한 probe 목록이
+    전달되지 않아, 모델이 probe ID 를 지어내 UNSUPPORTED_PROBE 가 난다.
+    팀 구성 시점에 시스템 프롬프트로 구워 넣는다.
+    """
+    contract = session.dataset.contract
+    catalog = session.dataset.probes
+
+    allowed = (
+        _AUDIT_PROBES if agent_id == AUDIT
+        else tuple(p.probe_id for p in catalog.probes)
+    )
+    budget = session.ledger.limits.role_model_calls.get(agent_id, 4)
+    lines = [
+        "",
+        "## 이 작업의 계약",
+        "",
+        "```json",
+        json.dumps(contract.neutral_summary(), ensure_ascii=False, indent=2),
+        "```",
+        "",
+    ]
+    if Tool.RUN_PROBE in TOOL_ACL.get(agent_id, frozenset()):
+        lines += [
+            "## 사용할 수 있는 probe (이 ID 만 유효하다)",
+            "",
+        ]
+        for probe in catalog.probes:
+            if probe.probe_id not in allowed:
+                continue
+            lines.append(
+                f"- `{probe.probe_id}` — {probe.description} "
+                f"(불변식 `{probe.invariant}`)"
+            )
+        lines += [
+            "",
+            "`run_probe` 의 인자는 `probe_id` 하나다. **목록에 없는 이름을 "
+            "지어내면 거절된다.**",
+            "",
+        ]
+        if agent_id == AUDIT:
+            # 어떤 probe 가 어떤 위험 영역을 덮는지 알려 준다.
+            # 이걸 모르면 한쪽만 돌리고 감사가 미완료로 끝난다.
+            lines += [
+                "### 위험 영역을 덮으려면 어떤 probe 를 돌려야 하는가",
+                "",
+            ]
+            for requirement in contract.audit_requirements:
+                covering = [
+                    f"`{probe.probe_id}`"
+                    for probe in catalog.probes
+                    if requirement.risk_id in probe.covers
+                    and probe.probe_id in allowed
+                ]
+                lines.append(
+                    f"- `{requirement.risk_id}` ← {' 또는 '.join(covering) or '없음'}"
+                )
+            lines += [
+                "",
+                "**필수 위험 영역을 덮는 probe 를 먼저 전부 돌린 뒤** 결론을 낸다. "
+                "하나라도 빠지면 감사가 미완료로 거절된다.",
+                "",
+            ]
+    lines += [
+        "## 대상",
+        "",
+        "probe 와 코드 열람은 **현재 후보**를 대상으로 한다. "
+        "후보 해시는 런타임이 정하므로 네가 지정하지 않는다.",
+        "",
+        "## 예산 규율 (반드시 지킬 것)",
+        "",
+        f"너에게 허용된 모델 호출은 **{budget}회**다. 도구 호출 1건이 1회를 쓴다.",
+        "",
+        "- **도구는 최대 2회만** 쓴다. 그 다음 턴에는 반드시 결론을 낸다.",
+        "- 같은 도구를 같은 인자로 두 번 부르지 않는다. 결과는 이미 받았다.",
+        "- 확인하지 못한 것은 `unknowns` 에 적고 끝낸다. 더 파지 않는다.",
+        "- 호출이 남지 않으면 아무 결론도 전달되지 않는다. **끝내는 것이 우선이다.**",
+    ]
+    return "\n".join(lines)
+
+
 def build_team(
     session: RunSession, gateway: ToolGateway, model: ModelGateway
 ) -> DeepTeam:
@@ -186,7 +271,7 @@ def build_team(
         subagents.append({
             "name": agent_id,
             "description": _ROLE_SUMMARY[agent_id],
-            "system_prompt": BY_AGENT[agent_id],
+            "system_prompt": BY_AGENT_DEEP[agent_id] + _context_block(session, agent_id),
             "tools": _as_langchain_tools(gateway, factory),
             "model": for_agent(model, agent_id),
         })
@@ -208,7 +293,7 @@ def build_team(
         model=lead_model,
         tools=_as_langchain_tools(gateway, main_factory),
         subagents=subagents,
-        system_prompt=BY_AGENT["main"],
+        system_prompt=BY_AGENT_DEEP["main"],
         middleware=[FilesystemMiddleware(tools=["read_file"]), guard],
     )
 

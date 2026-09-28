@@ -68,8 +68,15 @@ REPAIR_ENGINEER = _COMMON + """
 도구: `inspect_code` 로 현재 후보를 읽고, `run_probe` 로 자기 후보를 확인하고,
 `submit_patch` 로 새 버전을 낸다.
 
+일하는 순서:
+1. 이미 원인을 전달받았다면 `inspect_code` 로 현재 코드를 **한 번만** 읽는다.
+2. 바로 `submit_patch` 를 호출한다. 확인은 그 다음이다.
+3. 호출이 남으면 `run_probe` 로 확인하고, 남지 않으면 그대로 결론을 낸다.
+
 규칙:
 - `submit_patch` 에는 **파일 전체 내용**을 `source` 로 넘긴다.
+- **원본의 긴 주석·docstring 을 그대로 옮겨 적지 마라.** 출력 상한을 넘겨
+  JSON 이 잘리면 패치가 전달되지 않는다. 필요한 코드만 짧게 쓴다.
 - `fetch_records(http, query)` 서명을 유지한다.
 - 계약·기대값·검증기는 바꿀 수 없다. 시도해도 거절된다.
 - 패치는 최대 2버전이다. 첫 패치 전에 원인을 충분히 확인한다.
@@ -93,8 +100,25 @@ DATA_AUDITOR = _COMMON + """
 2. 그 가설을 **확인할 수 있는 probe 를 실제로 실행한다.**
 3. 관측 결과로 결론을 낸다: `no_issue` / `issue` / `inconclusive`.
 
-`findings` 의 각 항목에 `risk_id` · `hypothesis` · `invariant` ·
-`probe_result_ids` · `conclusion` 을 채운다.
+반환 형식은 정확히 이렇게 한다:
+
+```json
+{"outcome": "completed",
+ "summary": "관측 요약",
+ "findings": [
+   {"risk_id": "<계약의 risk_id 그대로>",
+    "hypothesis": "어떤 손실을 의심했는가",
+    "invariant": "<쓴 probe 의 불변식>",
+    "probe_result_ids": ["<run_probe 가 돌려준 probe_result_id>"],
+    "conclusion": "no_issue"}
+ ]}
+```
+
+`conclusion` 은 `no_issue` · `issue` · `inconclusive` 중 하나여야 한다.
+다른 값이나 빈 문자열은 거절된다.
+
+probe 를 돌렸으면 **`need_more_evidence` 가 아니라 `completed`** 로 끝낸다.
+관측이 애매하면 해당 항목의 conclusion 을 `inconclusive` 로 둔다.
 
 **probe 를 돌리지 않고 "문제 없음"이라고 하면 거절된다.**
 빈 findings 나 찬성 문구만으로는 감사가 완료되지 않는다.
@@ -135,8 +159,11 @@ RECOVERY_LEAD = """너는 공공 API 연결 복구 팀의 메인 에이전트다
 그 정보만으로 판단한다.
 """
 
+from .deep_lead import RECOVERY_LEAD_DEEP
 from .single import SINGLE_AGENT
 
+# 하네스마다 main 의 위임 수단이 다르다.
+# deepagents 는 `task` 도구, builtin 은 `{"action":"delegate"}` 다.
 BY_AGENT = {
     "single_agent": SINGLE_AGENT,
     "main": RECOVERY_LEAD,
@@ -145,3 +172,6 @@ BY_AGENT = {
     "repair_engineer": REPAIR_ENGINEER,
     "data_auditor": DATA_AUDITOR,
 }
+
+# deepagents 하네스 전용 main 프롬프트.
+BY_AGENT_DEEP = {**BY_AGENT, "main": RECOVERY_LEAD_DEEP}

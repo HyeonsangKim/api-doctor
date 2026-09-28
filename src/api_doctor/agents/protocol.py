@@ -96,7 +96,7 @@ class AgentResult:
         }
 
 
-def parse_agent_turn(text: str) -> AgentTurn:
+def parse_agent_turn(text: str, *, strict_findings: bool = False) -> AgentTurn:
     """전문 역할의 출력을 해석한다."""
     data = parse_json_object(text)
 
@@ -114,10 +114,20 @@ def parse_agent_turn(text: str) -> AgentTurn:
 
     if "outcome" not in data:
         raise ProtocolError("tool 또는 outcome 중 하나가 있어야 합니다.")
-    return AgentTurn(tool_request=None, result=parse_agent_result(data))
+    return AgentTurn(
+        tool_request=None,
+        result=parse_agent_result(data, strict_findings=strict_findings),
+    )
 
 
-def parse_agent_result(data: dict[str, Any]) -> AgentResult:
+def parse_agent_result(data: dict[str, Any], *, strict_findings: bool = False) -> AgentResult:
+    """전문 역할의 반환을 해석한다.
+
+    `strict_findings` 는 **감사자에게만** 켠다. risk_id·conclusion·probe_result_ids
+    를 갖춘 형식은 PRD §3.2 의 감사 완료 조건이며, 명세·진단 역할의 findings 는
+    자유로운 관측이다. 모두에게 감사 형식을 요구하면 정상적인 조사 결과가
+    "계약 위반" 으로 버려진다.
+    """
     raw_outcome = str(data.get("outcome", "")).strip()
     try:
         outcome = Outcome(raw_outcome)
@@ -130,12 +140,23 @@ def parse_agent_result(data: dict[str, Any]) -> AgentResult:
     findings: list[Finding] = []
     for raw in data.get("findings") or []:
         if not isinstance(raw, dict):
-            raise ProtocolError("findings 항목은 객체여야 합니다.")
+            if strict_findings:
+                raise ProtocolError("findings 항목은 객체여야 합니다.")
+            # 자유 관측은 문장으로 와도 받는다.
+            findings.append(
+                Finding(risk_id="", hypothesis=str(raw)[:600], invariant="",
+                        conclusion="inconclusive", evidence_ids=(),
+                        probe_result_ids=())
+            )
+            continue
         conclusion = str(raw.get("conclusion", "")).strip()
         if conclusion not in _CONCLUSIONS:
-            raise ProtocolError(
-                f"허용되지 않은 conclusion: {conclusion!r}. 허용: {sorted(_CONCLUSIONS)}"
-            )
+            if strict_findings:
+                raise ProtocolError(
+                    f"허용되지 않은 conclusion: {conclusion!r}. "
+                    f"허용: {sorted(_CONCLUSIONS)}"
+                )
+            conclusion = "inconclusive"
         findings.append(
             Finding(
                 risk_id=str(raw.get("risk_id", "")).strip(),

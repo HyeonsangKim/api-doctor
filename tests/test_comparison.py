@@ -58,11 +58,21 @@ def test_single_agent_gets_the_same_tool_power() -> None:
 
 
 def test_single_agent_gets_the_same_total_budget() -> None:
+    """PRD §7.3: 같은 **총예산**을 준다.
+
+    역할별 상한의 합은 전체 상한보다 크다. 실측 후 역할별 여유를 늘렸기
+    때문이며, 실질 제약은 전체 호출 수다. 대조군에게는 그 전체 상한을
+    그대로 준다 — 역할이 하나뿐이니 나눌 것이 없다.
+    """
     limits = BudgetLedger().limits
-    team_total = sum(
+    assert limits.role_model_calls["single_agent"] == limits.model_calls
+
+    team_ceiling = sum(
         v for k, v in limits.role_model_calls.items() if k not in CONTROL_AGENTS
     )
-    assert limits.role_model_calls["single_agent"] == team_total
+    assert team_ceiling >= limits.model_calls, (
+        "역할별 상한의 합이 전체보다 작으면 전체 상한이 도달 불가능해진다"
+    )
 
 
 @requires_docker

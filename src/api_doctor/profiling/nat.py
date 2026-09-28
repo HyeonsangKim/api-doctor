@@ -57,7 +57,8 @@ def collect_spans(
 ) -> list[Span]:
     spans = [
         Span(
-            agent_id=call.agent_id, kind="model",
+            agent_id=call.agent_id,
+            kind="failed" if call.tokens_kind == "failed" else "model",
             label=f"model:{call.agent_id}",
             started_ms=call.started_ms, ended_ms=call.ended_ms,
             detail=f"{call.total_tokens or 0} tokens ({call.tokens_kind})",
@@ -83,9 +84,15 @@ def per_role(model_calls: list[ModelCall]) -> dict[str, dict[str, Any]]:
     for call in model_calls:
         row = rows.setdefault(
             call.agent_id,
-            {"calls": 0, "tokens": 0, "latency_ms": 0,
-             "estimated_calls": 0, "errors": 0},
+            {"calls": 0, "attempts": 0, "tokens": 0, "latency_ms": 0,
+             "estimated_calls": 0, "errors": 0, "provider_failures": 0},
         )
+        row["attempts"] += 1
+        if call.tokens_kind == "failed":
+            # 공급자가 아무것도 반환하지 않은 시도. 예산에서 환불됐다.
+            row["provider_failures"] += 1
+            row["errors"] += 1
+            continue
         row["calls"] += 1
         row["tokens"] += call.total_tokens or 0
         row["latency_ms"] += call.latency_ms
@@ -139,16 +146,17 @@ def write_report(
         add("  역할별 구분이 구조적으로 보장된다 (FR-003).")
     add("")
 
-    add(f"{'역할':24}{'호출':>6}{'토큰':>10}{'평균지연ms':>12}{'추정':>6}")
-    add("-" * 58)
-    for agent_id in AGENT_IDS:
+    add(f"{'역할':24}{'호출':>6}{'시도':>6}{'토큰':>10}{'평균지연ms':>12}{'실패':>6}")
+    add("-" * 66)
+    for agent_id in (*AGENT_IDS, "single_agent"):
         row = rows.get(agent_id)
         if not row:
             continue
-        add(f"{agent_id:24}{row['calls']:>6}{row['tokens']:>10}"
-            f"{row['avg_latency_ms']:>12}{row['estimated_calls']:>6}")
-    add("-" * 58)
+        add(f"{agent_id:24}{row['calls']:>6}{row['attempts']:>6}{row['tokens']:>10}"
+            f"{row['avg_latency_ms']:>12}{row['provider_failures']:>6}")
+    add("-" * 66)
     total_calls = sum(r["calls"] for r in rows.values())
+    total_failures = sum(r["provider_failures"] for r in rows.values())
     total_tokens = sum(r["tokens"] for r in rows.values())
     add(f"{'합계':24}{total_calls:>6}{total_tokens:>10}")
     add("")
@@ -157,6 +165,8 @@ def write_report(
     ledger_calls = int(ledger_usage.get("model_calls", 0))
     add("원장 대조 (AC-16)")
     add(f"  역할별 합계 {total_calls} · gateway 원장 {ledger_calls}")
+    if total_failures:
+        add(f"  공급자 실패 {total_failures}건은 환불되어 양쪽 모두에서 제외된다.")
     if total_calls == ledger_calls:
         add("  일치합니다.")
     else:

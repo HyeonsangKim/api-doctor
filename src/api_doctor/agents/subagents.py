@@ -95,7 +95,9 @@ def run_subagent(
         messages.append({"role": "assistant", "content": reply})
 
         try:
-            turn = parse_agent_turn(reply)
+            turn = parse_agent_turn(
+                reply, strict_findings=agent_id == "data_auditor"
+            )
         except ProtocolError as exc:
             # 형식 재시도 1회도 같은 예산에 포함된다 (PRD §5.1.2).
             messages.append({

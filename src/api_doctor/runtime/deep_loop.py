@@ -26,6 +26,9 @@ from .orchestrator import OrchestrationResult, _run_gate
 from .session import AuditRecord, RunSession
 
 MAX_LEAD_STEPS = 24
+# PRD §5.3.3: 최종 검증 실패 후 main 에 돌아가는 개발 루프.
+# 전체 시간·2패치·현재 hash 조건을 만족할 때만 허용한다.
+MAX_ATTEMPTS = 2
 
 
 @dataclass(slots=True)
@@ -72,29 +75,48 @@ def orchestrate_deep(
     delegations: list[_Delegation] = []
 
     status: RunStatus | None = None
-    try:
-        team.agent.invoke(
-            {"messages": [{"role": "user", "content": _opening(session)}]},
-            {"recursion_limit": MAX_LEAD_STEPS,
-             "configurable": {"thread_id": session.run_id}},
-        )
-    except Cancelled:
-        session.forced_halt = str(RunStatus.CANCELLED)
-        status = RunStatus.CANCELLED
-    except BudgetExceeded as exc:
-        session.events.append(EventType.BUDGET_EVENT, str(exc)[:160])
-        status = RunStatus.BUDGET_EXHAUSTED
-    except Exception as exc:  # noqa: BLE001 - 하네스 예외도 같은 게이트로 간다
+    gate: GateDecision | None = None
+
+    for attempt in range(MAX_ATTEMPTS):
+        try:
+            team.agent.invoke(
+                {"messages": [{"role": "user",
+                               "content": _opening(session, gate)}]},
+                {"recursion_limit": MAX_LEAD_STEPS,
+                 "configurable": {"thread_id": f"{session.run_id}-{attempt}"}},
+            )
+        except Cancelled:
+            session.forced_halt = str(RunStatus.CANCELLED)
+            status = RunStatus.CANCELLED
+            break
+        except BudgetExceeded as exc:
+            session.events.append(EventType.BUDGET_EVENT, str(exc)[:160])
+            status = RunStatus.BUDGET_EXHAUSTED
+            break
+        except Exception as exc:  # noqa: BLE001 - 하네스 예외도 같은 게이트로 간다
+            session.events.append(
+                EventType.PLAN_REVISED,
+                f"하네스가 예외로 끝났습니다: {type(exc).__name__}: {str(exc)[:160]}",
+                error="agent_protocol_error",
+            )
+
+        # 감사 findings 를 반영한 뒤 게이트를 본다.
+        for run in _delegations_from_guard(team, gateway):
+            if run.agent_id == "data_auditor" and run.result.findings:
+                _record_findings(session, run.result)
+        gate = _run_gate(session)
+        if gate.terminal and gate.status is not RunStatus.VERIFICATION_INCONCLUSIVE:
+            break
+        if not _can_retry(session, attempt):
+            break
         session.events.append(
             EventType.PLAN_REVISED,
-            f"하네스가 예외로 끝났습니다: {type(exc).__name__}: {str(exc)[:160]}",
-            error="agent_protocol_error",
+            f"게이트가 되돌려보냈습니다. main 으로 돌아갑니다 "
+            f"({attempt + 2}/{MAX_ATTEMPTS}).",
+            reason=gate.detail[:200], rejection=str(gate.rejection),
         )
 
     delegations = _delegations_from_guard(team, gateway)
-    for run in delegations:
-        if run.agent_id == "data_auditor" and run.result.findings:
-            _record_findings(session, run.result)
     for run in delegations:
         session.events.append(
             EventType.DELEGATION_FINISHED,
@@ -104,7 +126,8 @@ def orchestrate_deep(
             candidate_hash=session.current_hash, harness="deepagents",
         )
 
-    gate: GateDecision = _run_gate(session)
+    if gate is None:
+        gate = _run_gate(session)
     final = status or gate.status or RunStatus.VERIFICATION_INCONCLUSIVE
     if status in (RunStatus.CANCELLED, RunStatus.BUDGET_EXHAUSTED):
         final = status
@@ -116,7 +139,23 @@ def orchestrate_deep(
     )
 
 
-def _opening(session: RunSession) -> str:
+def _can_retry(session: RunSession, attempt: int) -> bool:
+    """개발 루프로 돌아갈 수 있는가 (PRD §5.3.3).
+
+    전체 시간·패치 상한·예산이 남아 있어야 한다.
+    """
+    if attempt + 1 >= MAX_ATTEMPTS:
+        return False
+    if session.forced_halt is not None:
+        return False
+    if session.ledger.patches >= session.ledger.limits.patches:
+        return False
+    if not session.ledger.can_spend_model_call("main"):
+        return False
+    return bool(session.ledger.reserve_finish_slot())
+
+
+def _opening(session: RunSession, gate: GateDecision | None = None) -> str:
     contract = session.dataset.contract
     payload = {
         "run_id": session.run_id,
@@ -130,10 +169,19 @@ def _opening(session: RunSession) -> str:
             "request_finish 로 종료 검증을 예약하세요."
         ),
     }
+    if gate is not None:
+        payload["previous_attempt"] = {
+            "rejection": str(gate.rejection) if gate.rejection else None,
+            "detail": gate.detail[:400],
+            "what_to_do": (
+                "종료 게이트가 되돌려보냈습니다. 위 사유를 보고 남은 단계를 "
+                "이어서 수행하세요. 이미 끝난 조사를 반복하지 마세요."
+            ),
+        }
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
-def _to_result(text: str) -> AgentResult:
+def _to_result(text: str, *, strict_findings: bool = False) -> AgentResult:
     """서브에이전트의 반환 본문을 공통 구조로 옮긴다.
 
     구조화되지 않은 평문이면 `need_more_evidence` 로 둔다 — 구조를 지키지
@@ -147,7 +195,7 @@ def _to_result(text: str) -> AgentResult:
             summary=(text or "구조화 반환이 없습니다.")[:1200],
         )
     try:
-        return parse_agent_result(data)
+        return parse_agent_result(data, strict_findings=strict_findings)
     except ProtocolError as exc:
         return AgentResult(
             outcome=Outcome.FAILED,
@@ -210,7 +258,11 @@ def _delegations_from_guard(
         ]
         runs.append(_Delegation(
             agent_id=record.agent_id, objective=record.objective,
-            result=_to_result(record.returned), tool_calls=list(tools),
+            result=_to_result(
+                record.returned,
+                strict_findings=record.agent_id == "data_auditor",
+            ),
+            tool_calls=list(tools),
         ))
     return runs
 
