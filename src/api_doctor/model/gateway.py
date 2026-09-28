@@ -31,6 +31,9 @@ MIN_CALL_INTERVAL = 1.5
 MAX_CALL_INTERVAL = 20.0
 #: 이만큼 연속 성공하면 간격을 줄여 본다.
 REWARD_STREAK = 4
+#: 폴백으로 내려간 뒤 이만큼 호출하면 주 모델을 한 번 다시 시험한다.
+#: 주 모델이 회복했는데 계속 폴백에 머무르면 더 약한 모델로 평가하게 된다.
+PRIMARY_RECHECK_EVERY = 6
 DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b"
 #: 주 모델이 과부하일 때 대신 쓸 모델.
 #:
@@ -231,6 +234,11 @@ class ModelGateway:
     calls: list[ModelCall] = field(default_factory=list)
     on_call: Callable[[ModelCall], None] | None = None
     limiter: RateLimiter | None = None
+    #: 마지막으로 성공한 모델. 주 모델이 죽어 있는 동안 호출마다 503 을
+    #: 한 번씩 무는 낭비를 막는다. 실측에서 호출 21회에 실패 22회였다.
+    _preferred: str = ""
+    #: 폴백에 머문 호출 수. 주기적으로 주 모델을 다시 시험한다.
+    _since_primary: int = 0
 
     def __post_init__(self) -> None:
         if self.limiter is None:
@@ -255,10 +263,11 @@ class ModelGateway:
         self.ledger.cancel.raise_if_cancelled()
 
         self._pace()
-        model = self.config.model
+        model = self._opening_model()
         text, error = self._attempt(agent_id, messages, retry_of=None, model=model)
         if error is None:
             self.limiter.reward()
+            self._remember(model)
             return text
 
         if not allow_retry or not _is_transient(error):
@@ -273,7 +282,9 @@ class ModelGateway:
         # 즉시 거절됐다. 우리가 만든 부하가 아니므로 기다려도 줄지 않는다.
         # 호출 예산은 환불되므로(§refund_failed_call) 재시도가 조사 예산을
         # 태우지 않는다. 실질 한계는 시간 예산이다.
-        fallbacks = iter(self.config.fallback_models)
+        fallbacks = iter(
+            [m for m in (self.config.model, *self.config.fallback_models) if m != model]
+        )
         for retry_index in range(MAX_TRANSIENT_RETRIES):
             if self.ledger.provider_failures_exhausted_for(agent_id):
                 raise ModelUnavailable(
@@ -304,11 +315,33 @@ class ModelGateway:
             )
             if error is None:
                 self.limiter.reward()
+                self._remember(model)
                 return text
             if not _is_transient(error):
                 break
 
         raise ModelUnavailable(error)
+
+    def _opening_model(self) -> str:
+        """이번 호출을 어느 모델로 시작할까.
+
+        주 모델이 과부하인 동안 매번 주 모델부터 시도하면 호출마다 503 을
+        한 번씩 물고 버린다. 마지막에 성공한 모델로 시작하되, 가끔 주 모델을
+        다시 시험해 회복을 놓치지 않는다.
+        """
+        if not self._preferred or self._preferred == self.config.model:
+            return self.config.model
+        self._since_primary += 1
+        if self._since_primary >= PRIMARY_RECHECK_EVERY:
+            self._since_primary = 0
+            return self.config.model
+        return self._preferred
+
+    def _remember(self, model: str) -> None:
+        """성공한 모델을 기억한다."""
+        if model == self.config.model:
+            self._since_primary = 0
+        self._preferred = model
 
     def _pace(self) -> None:
         """최소 간격이 지날 때까지 취소 가능하게 기다린다."""

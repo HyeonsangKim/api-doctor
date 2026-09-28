@@ -192,3 +192,42 @@ def test_fallback_list_excludes_models_that_are_not_callable() -> None:
 
     assert DEFAULT_FALLBACK_MODELS, "폴백이 하나는 있어야 503 에 대응할 수 있다"
     assert not any("llama-3.1-nemotron" in m for m in DEFAULT_FALLBACK_MODELS)
+
+
+def test_fallback_is_sticky_across_calls(monkeypatch) -> None:
+    """주 모델이 죽어 있는 동안 호출마다 503 을 다시 물지 않는다.
+
+    실측: 폴백을 넣고도 호출 21회에 공급자 실패 22회였다. complete() 마다
+    주 모델부터 다시 시도해 매번 한 번씩 버리고 있었다.
+    """
+    from api_doctor.model.gateway import DEFAULT_FALLBACK_MODELS
+
+    ledger = make_ledger()
+    _no_wait(monkeypatch, ledger)
+    primary = ModelConfig().model
+    backend = FlakyBackend({primary: "503 Service temporarily overloaded"})
+    gw = ModelGateway(backend=backend, ledger=ledger, limiter=RateLimiter.unpaced())
+
+    for _ in range(3):
+        gw.complete(agent_id="main", messages=[{"role": "user", "content": "x"}])
+
+    assert backend.seen.count(primary) == 1, (
+        f"주 모델을 {backend.seen.count(primary)}번 다시 시도했다"
+    )
+    assert backend.seen[1:] == [DEFAULT_FALLBACK_MODELS[0]] * 3
+
+
+def test_primary_is_rechecked_so_recovery_is_not_missed(monkeypatch) -> None:
+    """주 모델이 회복했는데 계속 폴백에 머무르면 더 약한 모델로 평가하게 된다."""
+    from api_doctor.model.gateway import PRIMARY_RECHECK_EVERY
+
+    ledger = make_ledger()
+    _no_wait(monkeypatch, ledger)
+    primary = ModelConfig().model
+    backend = FlakyBackend({primary: "503 Service temporarily overloaded"})
+    gw = ModelGateway(backend=backend, ledger=ledger, limiter=RateLimiter.unpaced())
+
+    for _ in range(PRIMARY_RECHECK_EVERY + 2):
+        gw.complete(agent_id="main", messages=[{"role": "user", "content": "x"}])
+
+    assert backend.seen.count(primary) >= 2, "주 모델을 다시 시험하지 않았다"
