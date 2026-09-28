@@ -319,6 +319,7 @@ def _submit_patch(session: RunSession):
             raise ToolError(
                 "INVALID_PATCH", "fetch_records(http, query) 를 유지해야 합니다."
             )
+        _reject_unparsable(source)
 
         verdict = session.ledger.can_submit_patch()
         if not verdict:
@@ -427,3 +428,41 @@ def _request_stop(session: RunSession):
         return {"accepted": True, "status": reason}
 
     return request_stop
+
+
+# 파이썬 코드에 섞이면 안 되는, 본문 서술에서 흔히 쓰는 글자들.
+# 우리 프롬프트가 구분자로 쓰는 문자가 그대로 코드에 흘러 들어온 적이 있다.
+_LOOKALIKES = {
+    "\u00b7": "가운뎃점(·)",
+    "\u2018": "여는 작은따옴표(\u2018)", "\u2019": "닫는 작은따옴표(\u2019)",
+    "\u201c": "여는 큰따옴표(\u201c)", "\u201d": "닫는 큰따옴표(\u201d)",
+    "\u2013": "en dash(\u2013)", "\u2014": "em dash(\u2014)",
+    "\u2192": "화살표(\u2192)", "\u00a0": "줄바꿈 없는 공백",
+    "\u3000": "전각 공백",
+}
+
+
+def _reject_unparsable(source: str) -> None:
+    """파싱되지 않는 패치를 제출 시점에 되돌려보낸다.
+
+    실측(2026-09-28): 수리자가 코드에 가운뎃점(·)을 넣어
+    `SyntaxError: invalid character '·' (U+00B7)` 로 실행이 죽었다.
+    그대로 받으면 고정 검증 4종이 전부 실패하고 패치 한도만 소모된다.
+    수리자가 무엇이 틀렸는지 알고 다시 낼 수 있어야 한다.
+    """
+    try:
+        compile(source, "candidate.py", "exec")
+    except SyntaxError as exc:
+        found = sorted({
+            name for ch, name in _LOOKALIKES.items() if ch in source
+        })
+        hint = ""
+        if found:
+            hint = (
+                f" 코드에 서술용 문자가 섞여 있습니다: {', '.join(found)}. "
+                "파이썬 코드에는 ASCII 만 쓰세요."
+            )
+        raise ToolError(
+            "INVALID_PATCH",
+            f"패치가 파싱되지 않습니다 ({exc.msg}, line {exc.lineno}).{hint}",
+        ) from exc

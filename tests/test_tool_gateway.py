@@ -237,3 +237,72 @@ def test_coverage_hint_is_not_given_to_other_roles(tmp_path) -> None:
     )
     result = gateway.bind(context)["run_probe"](probe_id="page_partition")
     assert "audit_coverage" not in result
+
+
+# ------------------------------------------------------- 파싱되지 않는 패치
+
+
+def _repair_gateway(tmp_path):
+    """수리자 컨텍스트에 바인딩된 도구."""
+    import sys
+
+    sys.path.insert(0, str(_TESTS_DIR))
+    from _harness import make_session
+
+    from api_doctor.tools.gateway import make_lease
+    from api_doctor.tools.impl import register_all
+
+    session = make_session(tmp_path)
+    gateway = ToolGateway(ledger=session.ledger)
+    register_all(gateway, session)
+    context = ToolContext(
+        run_id=session.run_id, task_id="t", agent_id=REPAIR,
+        candidate_hash=session.current_hash,
+        contract_hash=session.dataset.contract.contract_hash,
+        snapshot_hash=session.snapshot.snapshot_hash,
+        lease=make_lease(session.ledger, REPAIR),
+    )
+    return session, gateway.bind(context)
+
+
+@requires_docker
+def test_unparsable_patch_is_rejected_before_spending_the_limit(tmp_path) -> None:
+    """파싱되지 않는 패치는 패치 한도를 쓰지 않고 되돌려보낸다.
+
+    실측(2026-09-28): 수리자가 코드에 가운뎃점(·)을 넣어 SyntaxError 로
+    실행이 죽었고 고정 검증 4종이 전부 실패했다. 한도를 먼저 쓰면
+    수리자에게 다시 낼 기회가 없다.
+    """
+    session, bound = _repair_gateway(tmp_path)
+    before = session.ledger.patches
+
+    with pytest.raises(ToolError) as caught:
+        bound["submit_patch"](
+            source="def fetch_records(http, query):\n    a = 1 \u00b7 2\n    return []\n"
+        )
+
+    assert caught.value.code == "INVALID_PATCH"
+    assert "가운뎃점" in str(caught.value), "무엇이 틀렸는지 알려줘야 다시 낸다"
+    assert session.ledger.patches == before, "거절된 패치가 한도를 먹었다"
+
+
+@requires_docker
+def test_valid_patch_still_goes_through(tmp_path) -> None:
+    """구문 검사가 정상 패치를 막으면 안 된다."""
+    session, bound = _repair_gateway(tmp_path)
+    result = bound["submit_patch"](
+        source="def fetch_records(http, query):\n    return [{'LBRRY_SEQ_NO': '1'}]\n"
+    )
+    assert result["candidate_hash"]
+    assert session.ledger.patches == 1
+
+
+@requires_docker
+def test_plain_syntax_error_is_reported_without_a_false_hint(tmp_path) -> None:
+    """서술용 문자가 없는데 있다고 하면 수리자를 엉뚱한 데로 보낸다."""
+    _, bound = _repair_gateway(tmp_path)
+    with pytest.raises(ToolError) as caught:
+        bound["submit_patch"](
+            source="def fetch_records(http, query)\n    return []\n"
+        )
+    assert "서술용 문자" not in str(caught.value)

@@ -449,3 +449,15 @@ def test_audit_budget_is_reserved_after_repair() -> None:
     assert (
         DelegationGuard.RESERVED_FOR_AUDIT < DelegationGuard.RESERVED_FOR_LATE_STAGES
     ), "감사 단독 예약은 수리+감사 예약보다 작아야 한다"
+
+
+def test_repair_prompt_warns_against_non_ascii_in_code() -> None:
+    """실측에서 수리자가 코드에 가운뎃점을 넣어 SyntaxError 로 죽었다.
+
+    도구가 막기는 하지만, 막히고 다시 내는 것도 예산을 쓴다.
+    """
+    from api_doctor.agents.prompts import BY_AGENT_DEEP
+
+    repair = BY_AGENT_DEEP["repair_engineer"]
+    assert "ASCII" in repair, "코드에 ASCII 만 쓰라는 지침이 없다"
+    assert "·" in repair, "무엇이 문제인지 실제 글자로 보여줘야 한다"
