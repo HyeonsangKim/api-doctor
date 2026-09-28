@@ -28,6 +28,8 @@ class Variant:
     query: dict[str, Any]
     record_count: int
     identity_values: tuple[str, ...]
+    #: 이 변형이 후보에게 요청하게 만들어야 하는 구간들 ("2:3" 형식).
+    required_ranges: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)
@@ -37,12 +39,22 @@ class VariantResult:
     returned: int | None
     missing: list[str]
     unexpected: list[str]
+    #: 계약이 요구하는데 레코드에서 사라진 필드.
+    dropped_fields: list[str] = field(default_factory=list)
+    #: nullable=false 인데 비어 있는 필드.
+    blank_fields: list[str] = field(default_factory=list)
+    #: 요청됐어야 하는데 후보가 건드리지 않은 구간.
+    unrequested_ranges: list[str] = field(default_factory=list)
     error: str | None = None
 
     def to_json(self) -> dict[str, Any]:
         return {
             "name": self.name, "passed": self.passed, "returned": self.returned,
-            "missing": self.missing, "unexpected": self.unexpected, "error": self.error,
+            "missing": self.missing, "unexpected": self.unexpected,
+            "dropped_fields": self.dropped_fields,
+            "blank_fields": self.blank_fields,
+            "unrequested_ranges": self.unrequested_ranges,
+            "error": self.error,
         }
 
 
@@ -67,6 +79,7 @@ def load_variants(root: Path) -> list[Variant]:
             name=str(v["name"]), query=dict(v["query"]),
             record_count=int(v["record_count"]),
             identity_values=tuple(str(x) for x in v["identity_values"]),
+            required_ranges=tuple(str(x) for x in v.get("required_ranges", ())),
         )
         for v in data["variants"]
     ]
@@ -108,15 +121,70 @@ def check(
         expected = set(variant.identity_values)
         missing = sorted(expected - set(actual))
         unexpected = sorted(set(actual) - expected)
+
+        # 건수와 식별키만 보면 필드를 통째로 떨어뜨린 후보가 통과한다.
+        # 실제로 그 일이 있었다: mapping 결함이 비공개 검사를 그냥 지나갔고,
+        # 그 결과를 "실제로는 고쳐졌다" 로 잘못 읽었다.
+        dropped, blank = _field_losses(outcome.records, dataset)
+
+        # 범위를 나눠 가져오는 결함은 결과만 봐서는 안 보일 수 있다.
+        # 후보가 어느 위치를 실제로 **요청했는지** 를 브로커가 관측한다.
+        #
+        # 구간을 글자 그대로 맞추라고 요구하지는 않는다. page_size 를 다르게
+        # 써도 정답일 수 있으므로, 필요한 위치를 전부 가져왔는지만 본다.
+        unrequested = _unrequested(variant.required_ranges, broker.requested_positions())
+
         passed = (
             not missing and not unexpected
+            and not dropped and not blank and not unrequested
             and len(outcome.records) == variant.record_count
         )
         results.append(
             VariantResult(
                 name=variant.name, passed=passed, returned=len(outcome.records),
                 missing=missing, unexpected=unexpected,
+                dropped_fields=dropped, blank_fields=blank,
+                unrequested_ranges=unrequested,
             )
         )
 
     return HiddenVerdict(passed=all(r.passed for r in results), results=results)
+
+
+def _unrequested(required_ranges: tuple[str, ...], touched: set[int]) -> list[str]:
+    """요청됐어야 하는데 후보가 건드리지 않은 구간."""
+    missed: list[str] = []
+    for spec in required_ranges:
+        try:
+            start, end = (int(x) for x in spec.split(":", 1))
+        except ValueError:
+            continue
+        if not set(range(start, end + 1)) <= touched:
+            missed.append(spec)
+    return missed
+
+
+def _field_losses(
+    records: list[dict[str, Any]], dataset: Dataset
+) -> tuple[list[str], list[str]]:
+    """계약이 요구하는 필드가 사라졌거나 비었는지 본다.
+
+    `dropped` 는 어느 레코드에도 없는 필드, `blank` 는 nullable=false 인데
+    비어 있는 필드다. 둘을 나누는 이유는 원인이 다르기 때문이다 —
+    매핑 경로를 잘못 읽으면 필드가 통째로 사라지고, 값을 잘못 꺼내면 빈다.
+    """
+    dropped: set[str] = set()
+    blank: set[str] = set()
+    for spec in dataset.contract.required_fields:
+        name = spec.name
+        if not any(name in r for r in records):
+            dropped.add(name)
+            continue
+        if spec.nullable:
+            continue
+        for r in records:
+            value = r.get(name)
+            if value is None or str(value).strip() == "":
+                blank.add(name)
+                break
+    return sorted(dropped), sorted(blank)

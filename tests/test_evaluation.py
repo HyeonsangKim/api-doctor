@@ -13,6 +13,19 @@ from _docker import requires_docker
 EVAL_ROOT = Path(__file__).resolve().parents[1] / "eval"
 
 
+def _hidden_fixture():
+    """비공개 검사에 필요한 데이터셋·스냅샷·백엔드."""
+    from api_doctor.data.broker import Snapshot
+    from api_doctor.sandbox.base import SandboxLimits
+    from api_doctor.sandbox.selftest import select_backend
+
+    dataset = load_registry()["seoul_library"]
+    snapshot = Snapshot.load(
+        dataset.snapshot_path(dataset.default_snapshot or ""), "seoul_library"
+    )
+    return dataset, snapshot, select_backend(SandboxLimits()).backend
+
+
 def test_every_case_file_exists() -> None:
     for case in load_cases(EVAL_ROOT):
         path = EVAL_ROOT / "cases" / f"{case['name']}.py"
@@ -181,3 +194,60 @@ def test_false_success_requires_both_claim_and_hidden_failure() -> None:
     # 성공을 주장하지 않았으면 비공개 검사가 실패해도 거짓 성공이 아니다
     assert not row(RunStatus.VERIFICATION_INCONCLUSIVE, False).false_success
     assert not row(RunStatus.VERIFICATION_INCONCLUSIVE, False).recovered
+
+
+# ------------------------------------------- 비공개 검사가 실제로 무엇을 잡나
+
+
+@requires_docker
+def test_hidden_check_catches_every_defect_kind_in_the_dev_set() -> None:
+    """비공개 검사가 각 결함 종류를 실제로 잡아내야 한다.
+
+    이걸 확인하지 않아 한동안 mapping 결함이 비공개 검사를 그냥 지나갔다.
+    건수와 식별키만 보고 있었고, 필드를 통째로 떨어뜨린 후보가 통과했다.
+    그 결과를 "실제로는 고쳐졌다" 로 잘못 읽었다.
+    """
+    from api_doctor.evaluation.hidden import check, load_variants
+
+    root = EVAL_ROOT
+    cases = load_cases(root)
+    variants = load_variants(root)
+    dataset, snapshot, backend = _hidden_fixture()
+
+    defective = [c for c in cases if c["kind"] not in ("healthy", "boundary")]
+    assert defective, "결함 사례가 없다"
+
+    passed_anyway = []
+    for case in defective:
+        verdict = check(
+            candidate=root / "cases" / f"{case['name']}.py",
+            dataset=dataset, snapshot=snapshot, backend=backend, variants=variants,
+        )
+        if verdict.passed:
+            passed_anyway.append(case["name"])
+
+    assert not passed_anyway, (
+        f"비공개 검사를 그냥 지나간 결함: {passed_anyway}. "
+        "검사가 제품의 고정 검증보다 약하면 평가가 거짓 신호를 낸다."
+    )
+
+
+@requires_docker
+def test_hidden_check_passes_healthy_candidates() -> None:
+    """정상 후보를 결함으로 잡으면 거짓 실패가 된다."""
+    from api_doctor.evaluation.hidden import check, load_variants
+
+    root = EVAL_ROOT
+    cases = load_cases(root)
+    variants = load_variants(root)
+    dataset, snapshot, backend = _hidden_fixture()
+
+    for case in (c for c in cases if c["kind"] == "healthy"):
+        verdict = check(
+            candidate=root / "cases" / f"{case['name']}.py",
+            dataset=dataset, snapshot=snapshot, backend=backend, variants=variants,
+        )
+        assert verdict.passed, (
+            f"{case['name']} 를 잘못 잡았다: "
+            f"{[r.to_json() for r in verdict.results if not r.passed]}"
+        )
