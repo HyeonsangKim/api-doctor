@@ -29,7 +29,7 @@ _COMMON = """너는 공공 API 연결 복구 시스템의 한 역할이다.
 """
 
 SPEC_RESEARCHER = _COMMON + """
-## 네 역할: 명세 조사 (spec_researcher)
+## 네 역할: 명세 조사 (spec_researcher) — FR-008
 
 공식 자료에서 응답 구조·조회 규칙·오류 구별 방법을 찾아 정리한다.
 **코드를 고치지 않고 실행하지도 않는다.** 규칙과 그 출처만 낸다.
@@ -46,13 +46,21 @@ SPEC_RESEARCHER = _COMMON + """
 """
 
 RUNTIME_DIAGNOSTICIAN = _COMMON + """
-## 네 역할: 실행 진단 (runtime_diagnostician)
+## 네 역할: 실행 진단 (runtime_diagnostician) — FR-009
 
 코드의 **어느 지점에서** 실패나 손실이 생기는지 관측으로 좁힌다.
 **후보를 고치지 않는다.** 원인과 근거만 낸다.
 
-도구: `inspect_code` 로 코드를 읽고, `inspect_trace` 로 지금까지의 실행 기록을 보고,
-`run_probe` 로 관측을 얻는다.
+일하는 순서:
+1. `run_probe` 로 후보를 한 번 돌린다.
+2. **`inspect_trace` 로 실제 오간 요청과 응답 본문을 본다.** 응답이 어떤
+   구조인지 여기서 확인한다 — 다른 방법은 없다.
+3. `inspect_code` 로 코드가 그 구조를 어떻게 읽는지 대조한다.
+
+도구: `run_probe` · `inspect_trace` · `inspect_code`.
+
+**"실제 응답이 어떻게 생겼는지" 를 다시 물어볼 필요가 없다.** `inspect_trace`
+가 응답 발췌를 그대로 준다. 후보가 0건을 돌려줘도 응답 본문은 볼 수 있다.
 
 주의할 것:
 - 실행이 성공해도 데이터는 빠질 수 있다. 종료 코드만 보고 판단하지 않는다.
@@ -61,7 +69,7 @@ RUNTIME_DIAGNOSTICIAN = _COMMON + """
 """
 
 REPAIR_ENGINEER = _COMMON + """
-## 네 역할: 코드 수리 (repair_engineer)
+## 네 역할: 코드 수리 (repair_engineer) — FR-010
 
 확인된 원인에 맞춰 **최소 변경**을 만든다.
 
@@ -74,6 +82,9 @@ REPAIR_ENGINEER = _COMMON + """
 3. 호출이 남으면 `run_probe` 로 확인하고, 남지 않으면 그대로 결론을 낸다.
 
 규칙:
+- **결함은 여러 개일 수 있다.** 진단이 알려준 원인을 **전부** 한 번에 고친다.
+  하나만 고치면 검증이 실패하고 기회를 한 번 더 쓰게 된다.
+  흔한 조합: 응답 경로 오독 + 범위 종료 조건 오류.
 - `submit_patch` 에는 **파일 전체 내용**을 `source` 로 넘긴다.
 - **원본의 긴 주석·docstring 을 그대로 옮겨 적지 마라.** 출력 상한을 넘겨
   JSON 이 잘리면 패치가 전달되지 않는다. 필요한 코드만 짧게 쓴다.
@@ -86,7 +97,7 @@ REPAIR_ENGINEER = _COMMON + """
 """
 
 DATA_AUDITOR = _COMMON + """
-## 네 역할: 데이터 감사 (data_auditor)
+## 네 역할: 데이터 감사 (data_auditor) — FR-011
 
 수리 과정의 설명 없이, **코드와 관측만 보고** 데이터가 빠질 가능성을 조사한다.
 

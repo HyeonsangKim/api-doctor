@@ -66,10 +66,11 @@ def _read_evidence(session: RunSession):
 
 def _search_spec(session: RunSession):
     def search_spec(context: ToolContext, question: str) -> dict[str, Any]:
-        """등록된 공식 자료에서 질문에 관련된 절을 찾는다.
+        """등록된 공식 자료에서 질문에 관련된 절을 찾는다 (FR-008, FR-016).
 
         원격 문서를 즉석에서 가져오지 않는다. 사전 검토·버전 고정된
-        스킬 자료만 사용한다 (PRD §4.5).
+        스킬 자료(`registry/skills/<dataset>/SKILL.md`)만 사용한다 (PRD §4.5).
+        자체 스킬이며 행사의 Skill API 요건 충족과는 별개다 (PRD §0.3).
         """
         dataset: Dataset = session.dataset
         skill_path = (
@@ -171,7 +172,11 @@ def _unified_diff(before: str, after: str) -> str:
 
 def _inspect_trace(session: RunSession):
     def inspect_trace(context: ToolContext) -> dict[str, Any]:
-        """정제된 요청·응답·오류 기록을 반환한다.
+        """정제된 요청·응답·오류 기록을 반환한다 (PRD §5.1.3).
+
+        **응답 본문 발췌가 포함된다.** 이것이 없으면 진단 역할이 실제 응답
+        구조를 관측할 방법이 없어, 깨진 후보가 0건을 돌려줄 때 원인을
+        좁히지 못하고 같은 질문을 반복한다.
 
         인증키 세그먼트는 `{KEY}` 로 치환돼 있다 (PRD §4.5).
         """
@@ -185,6 +190,8 @@ def _inspect_trace(session: RunSession):
         ][:6]
         return {
             "sandbox_runs": runs,
+            # 실제로 오간 요청과 **응답 발췌**. 인증키 자리는 이미 지워져 있다.
+            "broker_exchanges": session.last_broker_trace[:6],
             "denials": [d.to_json() for d in session.denials][:10],
             "last_broker_usage": session.last_broker_usage,
         }
@@ -197,7 +204,7 @@ def _inspect_trace(session: RunSession):
 
 def _run_probe(session: RunSession):
     def run_probe(context: ToolContext, probe_id: str) -> dict[str, Any]:
-        """등록 probe 를 현재 후보에서 실행하고 관측을 반환한다.
+        """등록 probe 를 현재 후보에서 실행하고 관측을 반환한다 (FR-009, FR-011).
 
         역할별로 대상이 다르다: 감사는 자신에게 허용된 catalog 로만 제한된다.
         """
@@ -260,7 +267,10 @@ def _submit_patch(session: RunSession):
     def submit_patch(
         context: ToolContext, source: str, rationale: str = ""
     ) -> dict[str, Any]:
-        """지정 후보 파일의 새 버전을 만든다. 수리 에이전트만 쓸 수 있다."""
+        """지정 후보 파일의 새 버전을 만든다 (FR-010).
+
+        수리 에이전트만 쓸 수 있다. 최대 2버전이며 원본은 바뀌지 않는다.
+        """
         if len(source.encode("utf-8")) > MAX_PATCH_BYTES:
             raise ToolError("INVALID_PATCH", "후보 파일이 100KB 상한을 넘습니다.")
         if "def fetch_records" not in source:

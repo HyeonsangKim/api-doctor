@@ -29,6 +29,11 @@ MAX_LEAD_STEPS = 24
 # PRD §5.3.3: 최종 검증 실패 후 main 에 돌아가는 개발 루프.
 # 전체 시간·2패치·현재 hash 조건을 만족할 때만 허용한다.
 MAX_ATTEMPTS = 2
+# 개발 루프로 되돌려보낼 수 있는 종료 상태.
+_RETRYABLE = frozenset({
+    RunStatus.VERIFICATION_INCONCLUSIVE,
+    RunStatus.VERIFICATION_FAILED,
+})
 
 
 @dataclass(slots=True)
@@ -105,7 +110,11 @@ def orchestrate_deep(
             if run.agent_id == "data_auditor" and run.result.findings:
                 _record_findings(session, run.result)
         gate = _run_gate(session)
-        if gate.terminal and gate.status is not RunStatus.VERIFICATION_INCONCLUSIVE:
+        # PRD §5.3.3 의 개발 루프는 "최종 검증 **실패** 후" 를 위한 것이다.
+        # 판정 보류만 되돌려보내고 검증 실패를 그대로 끝내면, 부분 수리가
+        # 두 번째 기회를 못 받는다 — 실측에서 결함 둘 중 하나만 고친 후보가
+        # 이대로 종료됐다.
+        if gate.terminal and gate.status not in _RETRYABLE:
             break
         if not _can_retry(session, attempt):
             break
@@ -170,12 +179,20 @@ def _opening(session: RunSession, gate: GateDecision | None = None) -> str:
         ),
     }
     if gate is not None:
+        failed_checks = [
+            {"kind": check["kind"], "summary": check["summary"]}
+            for check in (gate.verdict.to_json()["checks"] if gate.verdict else [])
+            if check["outcome"] != "pass"
+        ]
         payload["previous_attempt"] = {
+            "status": str(gate.status) if gate.status else None,
             "rejection": str(gate.rejection) if gate.rejection else None,
+            "failed_checks": failed_checks,
             "detail": gate.detail[:400],
             "what_to_do": (
-                "종료 게이트가 되돌려보냈습니다. 위 사유를 보고 남은 단계를 "
-                "이어서 수행하세요. 이미 끝난 조사를 반복하지 마세요."
+                "종료 게이트가 되돌려보냈습니다. 위 failed_checks 를 보고 "
+                "**남은 결함을 마저 고치세요.** 이미 끝난 조사를 반복하지 말고 "
+                "repair_engineer 에게 구체적인 수정 지시를 내리세요."
             ),
         }
     return json.dumps(payload, ensure_ascii=False, indent=2)

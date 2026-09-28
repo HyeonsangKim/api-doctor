@@ -163,8 +163,15 @@ def _markdown(inputs: ReportInputs, payload: dict[str, Any]) -> str:
             add(f"- 사용 도구: {', '.join(f'`{t}`' for t in row['tools_used']) or '없음'}")
             add(f"- 요약: {sanitize(row['summary'])}")
             for finding in row["findings"]:
-                add(f"- `{finding['risk_id']}` → **{finding['conclusion']}** "
-                    f"({sanitize(finding['hypothesis'])[:120]})")
+                # 감사 형식이 아닌 자유 관측은 risk_id 가 비어 있다.
+                # 빈 backtick 과 의미 없는 inconclusive 를 늘어놓으면
+                # 보고서가 읽히지 않는다.
+                text = sanitize(finding["hypothesis"])[:140]
+                if finding["risk_id"]:
+                    add(f"- `{finding['risk_id']}` → **{finding['conclusion']}**"
+                        + (f" ({text})" if text else ""))
+                elif text:
+                    add(f"- 관측: {text}")
             for unknown in row["unknowns"]:
                 add(f"- 미해결: {sanitize(unknown)}")
             add("")

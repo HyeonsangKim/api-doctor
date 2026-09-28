@@ -19,7 +19,11 @@ from ..runtime.budget import BudgetExceeded, BudgetLedger, Cancelled
 
 NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 # 일시 오류 재시도 횟수. 실패는 환불되므로 시간 예산이 실질 한계다.
-MAX_TRANSIENT_RETRIES = 3
+#
+# 실측(2026-09-28): 한 run 에 503 이 8회까지 났다. 3회로는 한 호출이
+# 끝내 실패해 파이프라인 단계가 통째로 날아간다. 실행이 100~300초이고
+# 시간 예산이 600초라 여유가 있다.
+MAX_TRANSIENT_RETRIES = 5
 DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b"
 
 
@@ -142,7 +146,7 @@ class ModelGateway:
                     f"중단합니다: {error}"
                 )
             delay = min(
-                2.0 * (retry_index + 1),
+                3.0 * (retry_index + 1),
                 max(0.0, self.ledger.usable_seconds - self.config.timeout_seconds),
             )
             if delay > 0:

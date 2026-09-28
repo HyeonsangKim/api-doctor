@@ -228,7 +228,7 @@ def test_repeated_delegation_is_rejected(tmp_path) -> None:
     rejected = [
         e for e in session.events.read(session.paths.run_dir)
         if e.type is EventType.DELEGATION_REJECTED
-        and e.data.get("reason") == "NO_NEW_EVIDENCE"
+        and e.data.get("reason") in ("NO_NEW_EVIDENCE", "ALREADY_ANSWERED")
     ]
     assert rejected, "중복 위임이 거절되지 않았다"
     assert session.ledger.role_delegations["spec_researcher"] == 1, \
@@ -344,12 +344,14 @@ def test_different_problems_take_different_paths(tmp_path) -> None:
 
 
 @requires_docker
-def test_redelegation_with_a_new_question_is_allowed(tmp_path) -> None:
-    """AC-03: 구체적인 새 질문이면 같은 역할에 다시 위임할 수 있다.
+def test_redelegation_is_allowed_once_late_stages_have_run(tmp_path) -> None:
+    """AC-03: 수리·감사를 마친 뒤의 재위임은 적응성이므로 막지 않는다.
 
-    중복 거절은 **같은** 질문일 때만이다.
+    감사가 문제를 찾아 명세를 다시 확인하는 경로가 바로 그것이다.
+    수리·감사가 **아직 남아 있을 때만** 조사 반복을 막는다 — 그때 반복하면
+    감사가 예산을 못 받고 굶기 때문이다.
     """
-    from _harness import j
+    from _harness import connector, j
 
     session = make_session(tmp_path)
     result, _ = _run_script(session, [
@@ -357,6 +359,21 @@ def test_redelegation_with_a_new_question_is_allowed(tmp_path) -> None:
                                     "description": "레코드 배열이 어느 경로에 있는가"}}),
         j({"tool": "search_spec", "args": {"question": "중첩 경로"}}),
         j({"outcome": "completed", "summary": "SeoulPublicLibraryInfo.row 다."}),
+
+        j({"tool": "task", "args": {"subagent_type": "repair_engineer",
+                                    "description": "중첩 경로를 고친다"}}),
+        j({"tool": "submit_patch", "args": {"source": connector("healthy")}}),
+        j({"outcome": "completed", "summary": "고쳤다."}),
+
+        j({"tool": "task", "args": {"subagent_type": "data_auditor",
+                                    "description": "손실 조사"}}),
+        j({"tool": "run_probe", "args": {"probe_id": "page_partition"}}),
+        j({"outcome": "completed", "summary": "경계가 의심된다.", "findings": [
+            {"risk_id": "pagination_boundary", "hypothesis": "마지막 구간",
+             "invariant": "partition_invariance", "conclusion": "inconclusive",
+             "probe_result_ids": ["pr1"]}]}),
+
+        # 감사 결과를 보고 명세를 다시 확인한다 — 이것이 적응성이다.
         j({"tool": "task", "args": {"subagent_type": "spec_researcher",
                                     "description": "범위 종료 조건은 무엇으로 판단하는가"}}),
         j({"tool": "search_spec", "args": {"question": "범위 종료"}}),
@@ -364,11 +381,31 @@ def test_redelegation_with_a_new_question_is_allowed(tmp_path) -> None:
         j({"outcome": "completed", "summary": "끝"}),
     ])
     spec_runs = [d for d in result.delegations if d.agent_id == "spec_researcher"]
-    assert len(spec_runs) == 2, "새 질문의 재위임이 거절됐다"
-    assert session.ledger.role_delegations["spec_researcher"] == 2
+    assert len(spec_runs) == 2, "수리·감사 후의 재위임까지 막혔다"
 
+
+@requires_docker
+def test_investigation_is_capped_while_repair_and_audit_pend(tmp_path) -> None:
+    """수리·감사가 남은 동안 조사만 반복하면 거절한다.
+
+    실측에서 main 이 문구만 바꿔 같은 역할에 다시 묻다가 감사가 굶었다.
+    """
+    from _harness import j
+
+    session = make_session(tmp_path)
+    _run_script(session, [
+        j({"tool": "task", "args": {"subagent_type": "spec_researcher",
+                                    "description": "레코드 배열이 어느 경로에 있는가"}}),
+        j({"tool": "search_spec", "args": {"question": "중첩 경로"}}),
+        j({"outcome": "completed", "summary": "확인함"}),
+        j({"tool": "task", "args": {"subagent_type": "spec_researcher",
+                                    "description": "응답 구조를 다시 설명해 달라"}}),
+        j({"outcome": "completed", "summary": "끝"}),
+    ])
     rejected = [
         e for e in session.events.read(session.paths.run_dir)
         if e.type is EventType.DELEGATION_REJECTED
+        and e.data.get("reason") == "ALREADY_ANSWERED"
     ]
-    assert not rejected, "다른 질문인데 중복으로 판정됐다"
+    assert rejected, "수리·감사가 남았는데 조사 반복이 통과했다"
+    assert session.ledger.role_delegations["spec_researcher"] == 1

@@ -74,6 +74,8 @@ class RunSession:
     final_verdict: Verdict | None = None
     forced_halt: str | None = None
     last_broker_usage: dict[str, Any] = field(default_factory=dict)
+    # 최근 실행에서 broker 가 처리한 요청·응답. `inspect_trace` 가 쓴다.
+    last_broker_trace: list[dict[str, Any]] = field(default_factory=list)
 
     # ------------------------------------------------------------- 후보 관리
 
@@ -134,6 +136,7 @@ class RunSession:
         self.denials.extend(outcome.denials)
         self._append_denials(outcome.denials)
         self.last_broker_usage = broker.usage()
+        self.last_broker_trace = broker.trace()
 
         self.events.append(
             EventType.SANDBOX_RUN,

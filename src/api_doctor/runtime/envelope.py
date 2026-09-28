@@ -50,9 +50,6 @@ class TaskEnvelope:
             "notes": list(self.context_notes),
         }
 
-    def to_context(self) -> ToolContext:
-        raise NotImplementedError   # build_context 가 세션 정보를 채운다
-
 
 _AUDIT_TEMPLATE = (
     "현재 후보가 계약의 조회 범위에서 데이터를 잃을 가능성을 조사한다. "

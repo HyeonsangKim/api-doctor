@@ -84,17 +84,28 @@ class BrokerCall:
     requested_range: tuple[int, int] | None = None
     body: str = ""
 
-    def sanitized(self) -> dict[str, Any]:
-        """trace 열람용. 키 자리를 지운 경로만 남긴다."""
+    def sanitized(self, body_chars: int = 900) -> dict[str, Any]:
+        """trace 열람용. 키 자리를 지운 경로와 응답 발췌를 남긴다.
+
+        PRD §5.1.3 은 `inspect_trace` 가 "정제한 요청·**응답**·오류" 를
+        반환하도록 정한다. 응답을 빼면 진단 역할이 실제 응답 구조를
+        관측할 방법이 없어, 깨진 후보가 0건을 돌려줄 때 원인을 좁히지 못하고
+        같은 질문을 반복한다.
+
+        본문은 동결된 공개 응답이며 인증키는 경로에만 있고 이미 지워진다.
+        """
         parts = urlsplit(self.url)
         segments = parts.path.strip("/").split("/")
         if segments:
             segments[0] = "{KEY}"
+        body = self.body or ""
         return {
             "path": "/" + "/".join(segments),
             "outcome": self.outcome,
             "reason": self.reason,
             "requested_range": list(self.requested_range) if self.requested_range else None,
+            "response_excerpt": body[:body_chars],
+            "response_truncated": len(body) > body_chars,
         }
 
 

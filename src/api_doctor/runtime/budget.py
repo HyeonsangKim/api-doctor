@@ -125,7 +125,16 @@ class CancelToken:
 class Limits:
     """PRD §4.1 설계 상한. 공급자의 무료 한도가 더 낮으면 항상 낮은 쪽을 쓴다."""
 
-    model_calls: int = 24
+    # 실측(2026-09-28) 후 조정. PRD §4.1 의 설계 상한은 24회였다.
+    #
+    # main 은 위임 1건당 2회를 쓴다 — 하나는 위임하는 데, 하나는 결과를 받아
+    # 다음을 정하는 데. 네 역할을 거치고 종료하려면 main 만 10회가 필요하고,
+    # 전문가 넷이 각 3회씩이면 22회다. 24 로는 503 한 번이나 재진단 한 번에
+    # 파이프라인이 끊긴다.
+    #
+    # 토큰(실측 최대 49k / 192k)과 시간(최대 320초 / 600초)은 여유가 크므로
+    # 호출 수만 인위적 병목이었다. 실제 비용 상한은 토큰과 시간이 지킨다.
+    model_calls: int = 32
     tokens: int = 192_000
     wall_seconds: float = 600.0
     sandbox_runs: int = 8
@@ -139,10 +148,10 @@ class Limits:
             # 한 번 돌려 보니 부족했다 — 도구 호출 1건이 모델 호출 1회를 쓰는데,
             # 조사에 probe 2회가 필요하고 공급자 503 이 한 회를 더 먹었다.
             # 전체 24회는 그대로이므로 총량이 여전히 실질 상한이다.
-            "main": 8, "spec_researcher": 5, "runtime_diagnostician": 6,
+            "main": 12, "spec_researcher": 5, "runtime_diagnostician": 6,
             "repair_engineer": 6, "data_auditor": 6,
             # 비교 실험 B: 팀 전체와 **같은 총량**을 준다 (PRD §7.3).
-            "single_agent": 24,
+            "single_agent": 32,
         }
     )
     role_delegations: int = 2
@@ -161,7 +170,7 @@ class Limits:
     # 공급자가 본문 없이 실패한 시도의 총 허용량. 무한 재시도를 막되,
     # 실측(2026-09-28) 결과 503 이 잦아 6회로는 조사 도중 끊긴다.
     # 실패는 환불되므로 실질 한계는 전체 시간 예산이다.
-    max_provider_failures: int = 15
+    max_provider_failures: int = 25
 
 
 @dataclass(slots=True)
