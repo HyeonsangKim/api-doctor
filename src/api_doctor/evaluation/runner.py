@@ -58,6 +58,81 @@ class CaseResult:
 
 
 @dataclass(slots=True)
+class RecoveryResultRow:
+    """복구 평가 1건."""
+
+    name: str
+    kind: str
+    split: str
+    status: RunStatus
+    claimed_success: bool      # 시스템이 성공을 주장했나
+    hidden_passed: bool | None  # 비공개 검사 판정
+    model_calls: int
+    tokens: int
+    provider_failures: int
+    duration_ms: int
+    hidden: dict[str, Any] = field(default_factory=dict)
+    note: str = ""
+
+    @property
+    def false_success(self) -> bool:
+        """성공을 주장했는데 비공개 검사가 틀렸다고 한 경우.
+
+        PRD §7.2 의 핵심 지표다. 0이어야 한다.
+        """
+        return self.claimed_success and self.hidden_passed is False
+
+    @property
+    def recovered(self) -> bool:
+        return self.claimed_success and self.hidden_passed is True
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "name": self.name, "kind": self.kind, "split": self.split,
+            "status": str(self.status), "claimed_success": self.claimed_success,
+            "hidden_passed": self.hidden_passed, "recovered": self.recovered,
+            "false_success": self.false_success,
+            "model_calls": self.model_calls, "tokens": self.tokens,
+            "provider_failures": self.provider_failures,
+            "duration_ms": self.duration_ms, "hidden": self.hidden, "note": self.note,
+        }
+
+
+@dataclass(slots=True)
+class RecoveryReport:
+    rows: list[RecoveryResultRow] = field(default_factory=list)
+    harness: str = "deepagents"
+
+    @property
+    def attempted(self) -> int:
+        return len(self.rows)
+
+    @property
+    def recovered(self) -> int:
+        return sum(r.recovered for r in self.rows)
+
+    @property
+    def false_successes(self) -> int:
+        return sum(r.false_success for r in self.rows)
+
+    def to_json(self) -> dict[str, Any]:
+        calls = sum(r.model_calls for r in self.rows)
+        return {
+            "harness": self.harness,
+            "cases": [r.to_json() for r in self.rows],
+            "summary": {
+                "attempted": self.attempted,
+                "recovered": self.recovered,
+                "false_successes": self.false_successes,
+                "total_model_calls": calls,
+                "total_tokens": sum(r.tokens for r in self.rows),
+                "total_provider_failures": sum(r.provider_failures for r in self.rows),
+                "avg_calls": round(calls / max(1, self.attempted), 1),
+            },
+        }
+
+
+@dataclass(slots=True)
 class EvalReport:
     results: list[CaseResult] = field(default_factory=list)
     recovery_attempted: bool = False
@@ -195,5 +270,100 @@ def run_detection(
         report.results.append(result)
         if on_case is not None:
             on_case(result)
+
+    return report
+
+
+# 복구를 시도할 결함 유형. 정상 코드는 baseline 에서 끝나고,
+# 경계 사례는 차단이 목적이므로 복구 대상이 아니다.
+RECOVERABLE_KINDS = frozenset({"format", "mapping", "range", "composite"})
+
+
+def run_recovery(
+    *,
+    cases_root: Path,
+    store_root: Path,
+    split: str = "locked",
+    dataset_id: str = "seoul_library",
+    harness: str = "deepagents",
+    on_case: Any = None,
+) -> RecoveryReport:
+    """복구 평가. **실제 모델을 호출한다.**
+
+    각 사례를 복구한 뒤, 팀이 보지 못한 비공개 변형으로 최종 후보를 검사한다
+    (PRD §7.1 b). 평가 실패를 같은 작업의 재수리로 돌려보내지 않는다.
+    """
+    from ..data.broker import Snapshot
+    from ..registry.loader import load_registry
+    from ..sandbox.base import SandboxLimits
+    from ..sandbox.selftest import select_backend
+    from .hidden import check as hidden_check
+    from .hidden import load_variants
+
+    report = RecoveryReport(harness=harness)
+    store = RunStore(store_root)
+    dataset = load_registry()[dataset_id]
+    snapshot = Snapshot.load(
+        dataset.snapshot_path(dataset.default_snapshot or ""), dataset_id
+    )
+    backend = select_backend(SandboxLimits()).backend
+    variants = load_variants(cases_root)
+
+    for case in load_cases(cases_root):
+        if split != "all" and case["split"] != split:
+            continue
+        if case["kind"] not in RECOVERABLE_KINDS:
+            continue
+
+        path = cases_root / "cases" / f"{case['name']}.py"
+        started = time.monotonic()
+        try:
+            outcome = recover(
+                dataset_id=dataset_id, code_path=path, store=store,
+                harness=harness, scripted=False,
+            )
+            status = outcome.status
+            session = outcome.baseline.session
+            usage = session.ledger.usage() if session else {}
+            note = ""
+        except InputError as exc:
+            report.rows.append(
+                RecoveryResultRow(
+                    name=case["name"], kind=case["kind"], split=case["split"],
+                    status=RunStatus.NEEDS_USER_ACTION, claimed_success=False,
+                    hidden_passed=None, model_calls=0, tokens=0,
+                    provider_failures=0,
+                    duration_ms=int((time.monotonic() - started) * 1000),
+                    note=f"{exc.code}: {exc}",
+                )
+            )
+            continue
+
+        claimed = status.is_success
+        hidden_passed: bool | None = None
+        hidden_detail: dict[str, Any] = {}
+
+        # 비공개 검사는 **최종 후보 확정 후에만** 실행한다.
+        if session is not None and session.current_hash in session.candidates:
+            verdict = hidden_check(
+                candidate=session.candidates[session.current_hash].path,
+                dataset=dataset, snapshot=snapshot, backend=backend,
+                variants=variants,
+            )
+            hidden_passed = verdict.passed
+            hidden_detail = verdict.to_json()
+
+        row = RecoveryResultRow(
+            name=case["name"], kind=case["kind"], split=case["split"],
+            status=status, claimed_success=claimed, hidden_passed=hidden_passed,
+            model_calls=int(usage.get("model_calls", 0)),
+            tokens=int(usage.get("tokens", 0)),
+            provider_failures=int(usage.get("provider_failures", 0)),
+            duration_ms=int((time.monotonic() - started) * 1000),
+            hidden=hidden_detail, note=note,
+        )
+        report.rows.append(row)
+        if on_case is not None:
+            on_case(row)
 
     return report

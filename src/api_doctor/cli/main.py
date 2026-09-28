@@ -188,10 +188,14 @@ def run(
 @app.command(name="eval")
 def evaluate(
     split: Annotated[str, typer.Option("--split", help="dev | locked | all")] = "all",
+    recovery: Annotated[bool, typer.Option(
+        "--recovery", help="실제 모델로 복구율을 측정한다 (크레딧 소모)")] = False,
+    harness: Annotated[str, typer.Option(
+        "--harness", help="deepagents | builtin | single")] = "deepagents",
     as_json: Annotated[bool, typer.Option("--json", help="JSON 으로 출력")] = False,
 ) -> None:
-    """평가 세트로 검출 정확도를 측정한다. 모델을 호출하지 않는다."""
-    from ..evaluation.runner import run_detection
+    """평가 세트로 검출 정확도 또는 복구율을 측정한다."""
+    from ..evaluation.runner import run_detection, run_recovery
 
     root = Path(__file__).resolve().parents[3] / "eval"
     if not (root / "cases.json").is_file():
@@ -212,6 +216,11 @@ def evaluate(
             )
 
     store_root = RunStore().root.parent / "eval-runs"
+
+    if recovery:
+        _run_recovery_eval(root, store_root, split, harness, as_json)
+        return
+
     if not as_json:
         err.print(f"[bold]평가 세트[/] split={split}\n")
     report = run_detection(
@@ -234,6 +243,48 @@ def evaluate(
         err.print(f"\n[dim]{summary['recovery_skipped_reason']}[/]")
     _emit(payload, as_json)
     raise typer.Exit(0 if report.detected == len(report.results) else 3)
+
+
+def _run_recovery_eval(
+    root: Path, store_root: Path, split: str, harness: str, as_json: bool
+) -> None:
+    """복구 평가. 실제 모델을 호출하고 비공개 기대값으로 최종 판정한다."""
+    from ..evaluation.runner import run_recovery
+
+    def on_case(row: Any) -> None:
+        if as_json:
+            return
+        mark = "[green]✓[/]" if row.recovered else (
+            "[red]거짓성공[/]" if row.false_success else "[yellow]✗[/]")
+        hidden = {True: "통과", False: "실패", None: "미실행"}[row.hidden_passed]
+        err.print(
+            f"  {mark} {row.name:34} [dim]{str(row.status):26}"
+            f"비공개={hidden:5} 호출 {row.model_calls:2} 503 {row.provider_failures:2}"
+            f" {row.duration_ms // 1000:3}초[/]"
+        )
+
+    if not as_json:
+        err.print(f"[bold]복구 평가[/] split={split} · harness={harness}")
+        err.print("[dim]실제 모델을 호출합니다. 비공개 기대값으로 최종 판정합니다.[/]\n")
+
+    report = run_recovery(
+        cases_root=root, store_root=store_root, split=split,
+        harness=harness, on_case=on_case,
+    )
+    payload = report.to_json()
+
+    if not as_json:
+        s = payload["summary"]
+        err.print()
+        err.print(f"[bold]복구 {s['recovered']}/{s['attempted']}[/]")
+        style = "green" if s["false_successes"] == 0 else "red"
+        err.print(f"  거짓 성공 [{style}]{s['false_successes']}건[/]")
+        err.print(
+            f"  [dim]모델 호출 {s['total_model_calls']} · 토큰 {s['total_tokens']:,}"
+            f" · 503 {s['total_provider_failures']} · 평균 {s['avg_calls']}회/건[/]"
+        )
+    _emit(payload, as_json)
+    raise typer.Exit(0 if report.false_successes == 0 else 3)
 
 
 @app.command()

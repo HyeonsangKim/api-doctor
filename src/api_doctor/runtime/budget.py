@@ -465,6 +465,21 @@ class BudgetLedger:
         self._log("reserve", Resource.SANDBOX_RUNS, is_finish=True)
         return ALLOW
 
+    def record_broker_calls(self, count: int, *, enforce: bool = True) -> None:
+        """브로커 호출을 기록한다.
+
+        `enforce` 가 거짓이면 상한을 적용하지 않는다 — fixture 는 동결분만
+        읽으므로 공급자에게 나가는 호출이 없다. 그래도 사용량은 기록한다.
+        """
+        if not enforce:
+            self.broker_calls += count
+            return
+        for _ in range(count):
+            try:
+                self.spend_broker_call()
+            except BudgetExceeded:
+                break
+
     def spend_broker_call(self) -> None:
         verdict = self.can_call_broker()
         if not verdict:

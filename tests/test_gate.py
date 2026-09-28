@@ -213,3 +213,41 @@ def test_gate_takes_no_model_output_as_input() -> None:
 
     signature = inspect.signature(evaluate)
     assert set(signature.parameters) == {"session", "candidate_hash", "final_verdict"}
+
+
+@requires_docker
+def test_final_verification_is_not_starved_by_earlier_probes(session) -> None:
+    """종료 검증이 앞선 probe 때문에 굶으면 안 된다.
+
+    평가에서 실제로 일어났다 — 같은 후보가 세 번 정상 실행된 뒤
+    가장 중요한 종료 검증만 실패했다. 원인은 동결분 읽기를 공식 API 호출
+    상한에 넣은 것이었다. PRD §4.1: "최종 검증은 이미 동결된 데이터만 사용해
+    새 공식 API 호출을 요구하지 않는다."
+    """
+    candidate_hash = _load(session, "healthy")
+
+    # 상한(20)을 훌쩍 넘는 probe 를 먼저 돌린다.
+    for _ in range(4):
+        session.run_probe("page_partition", candidate_hash)
+        session.run_probe("field_presence", candidate_hash)
+    assert session.ledger.usage()["broker_calls"] > 20, "상한을 넘겨야 의미가 있다"
+
+    records, error, *_ = session.execute_candidate(
+        candidate_hash, session.dataset.contract.query, is_finish=True
+    )
+    assert error is None, f"종료 검증이 굶었다: {error}"
+    assert records and len(records) == 5
+
+
+def test_fixture_reads_do_not_consume_the_provider_quota() -> None:
+    """fixture 는 동결분만 읽으므로 공급자 호출이 발생하지 않는다."""
+    from api_doctor.runtime.budget import BudgetLedger
+
+    ledger = BudgetLedger()
+    ledger.record_broker_calls(50, enforce=False)
+    assert ledger.broker_calls == 50, "관측은 그대로 기록한다"
+    assert ledger.can_call_broker(), "상한을 적용하지 않는다"
+
+    live = BudgetLedger()
+    live.record_broker_calls(50, enforce=True)
+    assert not live.can_call_broker(), "live 에서는 상한이 적용된다"

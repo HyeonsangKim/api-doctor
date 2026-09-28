@@ -237,11 +237,7 @@ def _execute(
         original, dataset.contract.query, broker.respond, limits
     )
     ledger.spend_sandbox_run()
-    for _ in range(broker.call_count):
-        try:
-            ledger.spend_broker_call()
-        except Exception:  # noqa: BLE001 - 상한은 다음 판정에서 걸린다
-            break
+    ledger.record_broker_calls(broker.call_count, enforce=source == "live")
     events.append(
         EventType.SANDBOX_RUN,
         f"원본을 격리 실행했습니다 ({outcome.duration_ms}ms).",
@@ -336,6 +332,7 @@ def _execute(
         run_id=run_id, paths=paths, events=events, ledger=ledger,
         evidence=EvidenceStore(paths.run_dir), dataset=dataset, snapshot=snapshot,
         backend=selection.backend, verifier=verifier, limits=limits,
+        source=source,
     )
     session.register_candidate(
         source=original.read_text(encoding="utf-8"), version=0,

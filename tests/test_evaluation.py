@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from api_doctor.evaluation.runner import load_cases, run_detection
+from api_doctor.registry.loader import load_registry
 
 from _docker import requires_docker
 
@@ -90,3 +91,93 @@ def test_report_serializes(tmp_path) -> None:
     payload = json.loads(json.dumps(report.to_json(), ensure_ascii=False))
     assert payload["summary"]["total"] == len(report.results)
     assert "false_positives" in payload["summary"]
+
+
+# ------------------------------------------------------- 비공개 검사 (PRD §7.1 b)
+
+
+def test_hidden_variants_use_ranges_the_team_never_optimizes_for() -> None:
+    """팀은 계약의 주 query 로 작업한다. 비공개 세트는 다른 범위를 쓴다."""
+    from api_doctor.evaluation.hidden import load_variants
+    from api_doctor.registry.loader import load_registry
+
+    contract_query = load_registry()["seoul_library"].contract.query
+    variants = load_variants(EVAL_ROOT)
+    assert variants
+    for variant in variants:
+        assert variant.query != contract_query, (
+            f"{variant.name} 이 계약의 주 query 와 같다 — 독립 검사가 아니다"
+        )
+
+
+def test_hidden_expectations_are_not_readable_by_agents() -> None:
+    """평가용 기대값은 에이전트 도구가 닿는 경로 밖에 있어야 한다."""
+    hidden = EVAL_ROOT / "hidden.json"
+    assert hidden.is_file()
+    assert hidden.stat().st_mode & 0o077 == 0, "비공개 파일이 0600 이 아니다"
+
+    # 레지스트리 밖에 있으므로 search_spec · read_evidence 로 닿을 수 없다
+    registry_root = load_registry()["seoul_library"].root
+    assert registry_root not in hidden.parents
+
+
+@requires_docker
+def test_hidden_check_catches_partial_repair(tmp_path) -> None:
+    """주 query 에서 통과하는 변형이 있어도 다른 범위에서 걸린다."""
+    from api_doctor.data.broker import Snapshot
+    from api_doctor.evaluation.hidden import check, load_variants
+    from api_doctor.registry.loader import load_registry
+    from api_doctor.sandbox.base import SandboxLimits
+    from api_doctor.sandbox.selftest import select_backend
+
+    dataset = load_registry()["seoul_library"]
+    snapshot = Snapshot.load(
+        dataset.snapshot_path(dataset.default_snapshot), dataset.dataset_id
+    )
+    backend = select_backend(SandboxLimits()).backend
+    variants = load_variants(EVAL_ROOT)
+    examples = EVAL_ROOT.parent / "examples"
+
+    healthy = check(
+        candidate=examples / "connector_healthy.py", dataset=dataset,
+        snapshot=snapshot, backend=backend, variants=variants,
+    )
+    assert healthy.passed, "정상 코드가 비공개 검사에서 떨어졌다"
+
+    partial = check(
+        candidate=examples / "connector_partial.py", dataset=dataset,
+        snapshot=snapshot, backend=backend, variants=variants,
+    )
+    assert not partial.passed, "절반만 고친 코드를 비공개 검사가 통과시켰다"
+    assert any(r.passed for r in partial.results), (
+        "일부 변형은 통과해야 이 검사의 가치가 드러난다"
+    )
+
+
+def test_recovery_only_targets_repairable_kinds() -> None:
+    """정상 코드와 경계 사례는 복구 대상이 아니다."""
+    from api_doctor.evaluation.runner import RECOVERABLE_KINDS
+
+    assert "healthy" not in RECOVERABLE_KINDS
+    assert "boundary" not in RECOVERABLE_KINDS
+    assert RECOVERABLE_KINDS == {"format", "mapping", "range", "composite"}
+
+
+def test_false_success_requires_both_claim_and_hidden_failure() -> None:
+    """거짓 성공의 정의: 시스템이 성공을 주장했는데 비공개 검사가 틀렸다고 한 것."""
+    from api_doctor.evaluation.runner import RecoveryResultRow
+    from api_doctor.runtime.events import RunStatus
+
+    def row(status, hidden):
+        return RecoveryResultRow(
+            name="x", kind="format", split="locked", status=status,
+            claimed_success=status.is_success, hidden_passed=hidden,
+            model_calls=0, tokens=0, provider_failures=0, duration_ms=0,
+        )
+
+    assert row(RunStatus.VERIFIED_REPAIRED, False).false_success
+    assert not row(RunStatus.VERIFIED_REPAIRED, True).false_success
+    assert row(RunStatus.VERIFIED_REPAIRED, True).recovered
+    # 성공을 주장하지 않았으면 비공개 검사가 실패해도 거짓 성공이 아니다
+    assert not row(RunStatus.VERIFICATION_INCONCLUSIVE, False).false_success
+    assert not row(RunStatus.VERIFICATION_INCONCLUSIVE, False).recovered

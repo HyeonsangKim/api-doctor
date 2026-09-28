@@ -65,6 +65,8 @@ class RunSession:
     backend: SandboxBackend
     verifier: FixedVerifier
     limits: SandboxLimits = field(default_factory=SandboxLimits)
+    # fixture 는 동결 스냅샷만 읽으므로 공급자 호출이 발생하지 않는다.
+    source: str = "fixture"
 
     candidates: dict[str, Candidate] = field(default_factory=dict)
     current_hash: str = ""
@@ -120,18 +122,21 @@ class RunSession:
             raise KeyError(f"등록되지 않은 후보입니다: {candidate_hash}")
 
         self.ledger.spend_sandbox_run(is_finish=is_finish)
+        # PRD §4.1 의 "공식 데이터 호출 20회" 는 **공급자에게 나가는 호출**의
+        # 상한이다. fixture 는 동결분만 읽으므로 그 상한을 적용하지 않는다.
+        # 적용하면 앞선 probe 들이 상한을 먹어 가장 중요한 **종료 검증이 굶는다**
+        # — 실제로 평가에서 그 일이 일어났다.
+        enforce = self.source == "live"
+        remaining = self.ledger.limits.broker_calls - self.ledger.broker_calls
         broker = DataBroker(
             dataset=self.dataset, snapshot=self.snapshot,
-            max_calls=self.ledger.limits.broker_calls - self.ledger.broker_calls,
+            max_calls=max(0, remaining) if enforce else 10_000,
         )
         outcome = self.backend.run_candidate(
             candidate.path, query, broker.respond, self.limits
         )
-        for _ in range(broker.call_count):
-            try:
-                self.ledger.spend_broker_call()
-            except Exception:  # noqa: BLE001 - 상한 초과는 다음 판정에서 걸린다
-                break
+        # 관측을 위해 항상 센다. 강제는 live 일 때만 한다.
+        self.ledger.record_broker_calls(broker.call_count, enforce=enforce)
 
         self.denials.extend(outcome.denials)
         self._append_denials(outcome.denials)

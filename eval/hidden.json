@@ -1,0 +1,68 @@
+{
+  "version": "v1",
+  "dataset_id": "seoul_library",
+  "note": "제품의 고정 검증과 분리된 평가용 비공개 기대값. 팀에 노출하지 않는다.",
+  "snapshot_id": "seoul_library_scope1_5",
+  "variants": [
+    {
+      "name": "tail_range",
+      "query": {
+        "start": 2,
+        "end": 5,
+        "page_size": 2
+      },
+      "record_count": 4,
+      "identity_values": [
+        "1066",
+        "2815",
+        "48",
+        "2843"
+      ],
+      "required_ranges": [
+        "2:3",
+        "4:5"
+      ],
+      "missing": []
+    },
+    {
+      "name": "single_page",
+      "query": {
+        "start": 1,
+        "end": 5,
+        "page_size": 5
+      },
+      "record_count": 5,
+      "identity_values": [
+        "1935",
+        "1066",
+        "2815",
+        "48",
+        "2843"
+      ],
+      "required_ranges": [
+        "1:5"
+      ],
+      "missing": []
+    },
+    {
+      "name": "narrow",
+      "query": {
+        "start": 3,
+        "end": 5,
+        "page_size": 1
+      },
+      "record_count": 3,
+      "identity_values": [
+        "2815",
+        "48",
+        "2843"
+      ],
+      "required_ranges": [
+        "3:3",
+        "4:4",
+        "5:5"
+      ],
+      "missing": []
+    }
+  ]
+}
